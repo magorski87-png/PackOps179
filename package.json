@@ -1,0 +1,12 @@
+{
+  "name": "packops-p179",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mobile and desktop Pack 179 leadership dashboard",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "build": "node tools/build.mjs",
+    "serve": "node tools/serve.mjs"
+  }
+}
