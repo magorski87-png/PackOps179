@@ -1,6 +1,6 @@
 const DB_NAME='packops-p179-v1';
-const DB_VERSION=1;
-export const TABLES=['events','tasks','receipts','attachments','equipment','budget','roster','bookmarks','settings'];
+const DB_VERSION=3;
+export const TABLES=['events','tasks','receipts','attachments','equipment','budget','roster','bookmarks','settings','calendarEvents','financeLedger','financeAccounts','financeAdjustments','financeReimbursements','financeTags','financeAudit'];
 let instancePromise;
 function openDb(){
   if(instancePromise)return instancePromise;

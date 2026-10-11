@@ -1,11 +1,19 @@
 import {TABLES,list,get,put,remove,readSetting,writeSetting,clearEverything} from './db.js';
 import {LINKS,MENU,MEETING,DEN_NAMES,isoToday,makeId,money,esc,safeUrl,niceDate,summary,completion,csvParse,brief} from './data.js';
 import {authorize,connected,disconnect,selectFolder,uploadReceipt} from './drive.js';
-import {parseRoster,importPrivacySummary} from './roster-import.js';
+import {parseRoster,importPrivacySummary,denGroup,exportRoster,groupScouts,RANKS} from './roster-import.js';
+import {calendarAuthorize,calendarList,calendarUpcoming,disconnectCalendar,calendarConnected} from './calendar-api.js';
+import {parseIcs,uniqueUpcoming} from './calendar-import.js';
+import {financeView} from './finance-ui.js';
+import {parseLedgerCsv,parseScoutCreditsCsv,financialSnapshot,reimbursePaidAllowed,csvExport,reportsRows,amount,EXPENSE_CATEGORIES} from './finance.js';
+import {fetchScoutCreditSnapshot} from './finance-google.js';
+import {TEMPLATE_ROWS,TEMPLATE_META} from './finance-template.js';
 
 const root=document.getElementById('root');
+const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
+let pwaInstallPrompt=null;
 const dbState=Object.fromEntries(TABLES.map(t=>[t,t==='settings'?[]:[]]));
-const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',toastId:0};
+const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name'};
 const now=()=>Date.now();
 const formData=(form,key)=>String(new FormData(form).get(key)||'').trim();
 const option=(value,label,current)=>`<option value="${esc(value)}"${String(value)===String(current)?' selected':''}>${esc(label)}</option>`;
@@ -20,6 +28,8 @@ const findEvent=id=>dbState.events.find(e=>e.id===id);
 const eventLabel=id=>findEvent(id)?.title||'General Pack operations';
 const eventOptions=()=>[['','General Pack operations'],...dbState.events.map(e=>[e.id,e.title])];
 const packLinkFolder=LINKS.packDrive;
+const upcomingRecords=()=>uniqueUpcoming([...dbState.calendarEvents,...ui.googleEvents,...dbState.events.map(e=>({...e,source:'PackOps workspace'}))],isoToday());
+const rosterRows=()=>{const q=ui.rosterFilter.trim().toLowerCase();return groupScouts(dbState.roster).filter(r=>(ui.rosterDen==='all'||(r.den||'Unassigned')===ui.rosterDen)&&(ui.rosterRank==='all'||r.rank===ui.rosterRank)&&(!ui.rosterReview||(r.issues||[]).length>0)&&[r.name,r.den,r.rank,r.guardian,r.email].some(v=>String(v||'').toLowerCase().includes(q))).sort((a,b)=>{const key=ui.rosterSort;return String(a[key]||'').localeCompare(String(b[key]||''),undefined,{numeric:true,sensitivity:'base'})||a.name.localeCompare(b.name)})};
 const intro=(kicker,title,desc,right='')=>`<div class="page-head"><div><span class="eyebrow">${esc(kicker)}</span><h1>${esc(title)}</h1><p>${esc(desc)}</p></div>${right?`<div class="no-print">${right}</div>`:''}</div>`;
 const note=(msg,warning=false)=>`<div class="note${warning?' warn':''}">${msg}</div>`;
 
@@ -55,37 +65,57 @@ function render(){
   <nav class="nav-list" aria-label="Main navigation"><button class="nav-link${ui.page==='home'?' active':''}" data-nav="home"><span class="emoji">🏡</span> Dashboard</button><div class="nav-label">Your tools</div>
   ${MENU.map(m=>`<button class="nav-link${ui.page===m.id?' active':''}" data-nav="${m.id}"><span class="emoji">${m.emoji}</span>${esc(m.label)}</button>`).join('')}</nav>
   <div class="sidebar-footer"><small>Pack 179 · Built for the people making Scouting happen.<br>First version saves working data on this device.</small><button data-nav="settings">⚙ &nbsp; Settings & Drive</button></div></aside>
-  <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-nav="home" aria-label="Dashboard">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">● Local workspace</span>${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
+  <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-nav="home" aria-label="Dashboard">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">● Local workspace</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
   <div class="content">${view()}</div></main>
-  <nav class="mobile-bottom no-print" aria-label="Mobile navigation">${[{id:'home',emoji:'🏡',name:'Home'},{id:'events',emoji:'✅',name:'Events'},{id:'volunteers',emoji:'🤝',name:'Tasks'},{id:'assistant',emoji:'✨',name:'Assistant'}].map(t=>`<button class="mobile-tab${ui.page===t.id?' active':''}" data-nav="${t.id}"><span class="emoji">${t.emoji}</span>${t.name}</button>`).join('')}</nav>
+  <nav class="mobile-bottom no-print" aria-label="Mobile navigation">${[{id:'home',emoji:'🏡',name:'Home'},{id:'calendar',emoji:'🗓️',name:'Calendar'},{id:'budget',emoji:'📊',name:'Finance'},{id:'receipts',emoji:'🧾',name:'Receipts'},{id:'events',emoji:'✅',name:'Events'}].map(t=>`<button class="mobile-tab${ui.page===t.id?' active':''}" data-nav="${t.id}"><span class="emoji">${t.emoji}</span>${t.name}</button>`).join('')}</nav>
  </div>`;
 }
 function view(){switch(ui.page){
  case 'home':return home();case 'calendar':return calendar();case 'budget':return budget();case 'receipts':return receipts();case 'meeting':return meeting();case 'volunteers':return volunteers();case 'events':return events();case 'roster':return roster();case 'equipment':return equipment();case 'assistant':return assistant();case 'library':return library();case 'settings':return settingsPage();default:return home();}}
 function home(){
- const s=summary(dbState.tasks);const next=dbState.events.filter(e=>e.date>=isoToday()).sort((a,b)=>a.date.localeCompare(b.date))[0];
+ const s=summary(dbState.tasks);const next=upcomingRecords()[0];
  return `<section class="hero"><div class="hero-copy"><span class="eyebrow" style="color:#eed69e">WELCOME TO PACKOPS</span><h2>Less organizing. More Scouting.</h2><p>Your Pack calendar, event planning, meeting guides, records and tools—all in one place, without replacing Scoutbook Plus.</p><div class="hero-action">${btn('✨ Review priorities','goto-assistant','btn btn-gold')}</div></div><div class="hero-symbol">⚜️</div></section>
  <div class="stats"><div class="stat"><div><strong>${dbState.events.length}</strong><span>Planned events</span></div><div class="stat-icon">🗓️</div></div><div class="stat"><div><strong>${s.open.length}</strong><span>Open responsibilities</span></div><div class="stat-icon">📋</div></div><div class="stat"><div><strong>${s.unassigned.length}</strong><span>Need an owner</span></div><div class="stat-icon">🤝</div></div><div class="stat"><div><strong>${s.overdue.length}</strong><span>Overdue in PackOps</span></div><div class="stat-icon">⏳</div></div></div>
+ <section class="panel next-up-section"><div class="row-between"><div><span class="kicker">AT A GLANCE</span><h2>Upcoming Pack events</h2></div>${btn('See calendar →','goto-calendar','btn btn-outline btn-small')}</div>
+ ${upcomingRecords().length?upcomingRecords().slice(0,4).map(e=>`<div class="event-preview-row"><div class="event-date-tile"><strong>${esc(e.date.slice(8,10))}</strong><span>${esc(new Date(e.date+'T12:00:00').toLocaleDateString('en-US',{month:'short'}))}</span></div><div style="flex:1;min-width:0"><strong>${esc(e.title)}</strong><div class="meta">${esc(e.source||'')} · ${niceDate(e.date)}${e.location?' · '+esc(e.location):''}</div></div>${e.url?link(e.url,'View','btn btn-ghost btn-small'):''}</div>`).join(''):`<p>No upcoming events loaded yet. Connect a Google Calendar or import an .ics calendar snapshot under Pack Calendar.</p>`}
+ </section>
  <div class="section-head"><h2>Everything you need</h2><small>Choose a tool to get started</small></div><div class="tool-grid">${MENU.map(m=>`<button class="tool-card" data-nav="${m.id}"><span class="tool-icon tone-${m.tone}">${m.emoji}</span><strong>${esc(m.label)}</strong><small>${esc(m.sub)}</small></button>`).join('')}</div>
- <div class="banner-note"><span style="font-size:18px">💡</span><div><strong>Working version 1</strong><br>Calendar and Pack Drive links open live Pack resources. Event plans, checklists, budgets and roster records are stored locally in this browser until shared synchronization is built. ${next?`Next locally planned event: <strong>${esc(next.title)}</strong> (${niceDate(next.date)}).`:'Add an event to start your own planning workspace.'}</div></div>`;
+ <div class="banner-note"><span style="font-size:18px">💡</span><div><strong>PackOps v0.3 local workspace</strong><br>Calendar and Pack Drive links open live Pack resources. Event plans, checklists, budgets and roster records are stored locally in this browser until shared synchronization is built. ${next?`Next locally planned event: <strong>${esc(next.title)}</strong> (${niceDate(next.date)}).`:'Add an event to start your own planning workspace.'}</div></div>`;
 }
-function calendar(){return `${intro('Keep one authoritative calendar','Pack Calendar','Open the current Pack calendar with one click, without maintaining a second version.')}
- <div class="split"><section class="panel stack"><div><span class="kicker">Current document</span><h2 style="margin-top:10px">2026–2027 Pack Calendar</h2><p>Verified file in the Pack 179 master calendar folder. Linked by its Drive file ID, so edits to the same file appear automatically.</p></div>${link(LINKS.calendar,'🗓️ Open current Pack calendar','btn btn-full')}${link(LINKS.calendarFolder,'View master calendar folder','btn btn-ghost btn-full')}<div class="privacy-strip">If the Pack replaces the PDF with a new file ID, update the shortcut in a future app revision. This version does not automatically determine which document is newest.</div></section>
- <section class="panel stack"><span class="kicker">Official system</span><h2>Scoutbook Plus</h2><p>Scoutbook Plus remains your source of truth for official calendar invitations, attendance and advancement. PackOps only manages the behind-the-scenes preparation.</p>${link(LINKS.scoutbook,'Open Scoutbook Plus','btn btn-outline btn-full')}${link(LINKS.eventTracker,'Open Pack event tracker','btn btn-outline btn-full')}</section></div>`}
-function budget(){
- const rows=dbState.budget;const planned=rows.reduce((a,r)=>a+Number(r.planned||0),0);const actual=rows.reduce((a,r)=>a+Number(r.actual||0),0);
- return `${intro('Treasurer-friendly','Budget Workspace','A planning dashboard and one-click access to the existing treasurer ledger.',btn('+ Add budget line','show-budget','btn'))}
- ${note('<strong>Important:</strong> The figures below are working estimates entered in PackOps on this device—not the official Pack ledger. Do not treat them as verified balances or paid expenses.',true)}
- <div class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div class="stat"><div><strong style="font-size:22px">${money(planned)}</strong><span>Planned (local)</span></div></div><div class="stat"><div><strong style="font-size:22px">${money(actual)}</strong><span>Actual entered (local)</span></div></div><div class="stat"><div><strong style="font-size:22px">${money(planned-actual)}</strong><span>Difference (local)</span></div></div></div>
- <div class="split"><div class="stack">${ui.form==='budget'?`<section class="panel">${budgetForm()}</section>`:''}<section class="panel"><div class="row-between"><h2>Planning categories</h2><span class="pill">${rows.length} entries</span></div>${rows.length?rows.map(r=>`<div class="list-item"><div class="row-between"><strong>${esc(r.category)}</strong>${btn('Remove','delete-budget','btn btn-danger btn-small',`data-id="${r.id}"`)}</div><div class="meta" style="margin-top:8px">Planned ${money(r.planned)} · Entered actual ${money(r.actual)}</div>${r.note?`<p>${esc(r.note)}</p>`:''}</div>`).join(''):empty('📊','No working budget lines','Use Add budget line to record planning estimates. No real Pack totals have been inferred.')}</section></div><section class="panel stack"><h2>Official financial records</h2><p>The treasurer maintains the official ledger. Open it without creating or modifying entries from this initial app.</p>${link(LINKS.ledger,'Open 2026–27 treasurer ledger','btn btn-full')}${link(LINKS.receiptRoot,'Open receipts folder','btn btn-ghost btn-full')}<div class="privacy-strip">Financial information should be restricted to authorized leadership. This local demo has no server-side access controls, so avoid sharing this device profile with unauthorized users.</div></section></div>`;
+function calendar(){
+ const current=settings('calendarId');const available=ui.calendars.length?ui.calendars:[...(current?[{id:current,name:settings('calendarName')||'Selected calendar'}]:[])];
+ const all=upcomingRecords();
+ return `${intro('See what is coming','Pack Calendar & Upcoming Events','Connect an existing Google Calendar or import an iCalendar snapshot. Scoutbook remains the official event system.')}
+ <section class="panel"><div class="row-between"><h2>Upcoming events</h2><span class="pill">${all.length} future events</span></div>
+ ${all.length?`<div class="events-list">${all.slice(0,30).map(e=>`<div class="event-preview-row"><div class="event-date-tile"><strong>${esc(e.date.slice(8,10))}</strong><span>${esc(new Date(e.date+'T12:00:00').toLocaleDateString('en-US',{month:'short'}))}</span></div><div style="flex:1;min-width:0"><strong>${esc(e.title)}</strong><div class="meta">${niceDate(e.date)}${e.time?' · '+esc(e.time.length===5?e.time:new Date(e.time).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})):''}${e.location?' · '+esc(e.location):''}</div><div class="meta">${esc(e.source||'Local')}</div></div>${e.url?link(e.url,'Open','btn btn-outline btn-small'):''}</div>`).join('')}</div>`:empty('🗓️','No upcoming events loaded','Connect a selected Google Calendar, import an .ics file, or create a local event workspace.')}
+ </section>
+ <div class="split" style="margin-top:20px"><section class="panel stack"><div><span class="kicker">Read-only calendar connection</span><h2>Google Calendar</h2><p>Read events from one calendar that you choose. This does not create or edit any Google or Scoutbook event.</p></div>
+ ${btn('✓ Use Pack 179 Calendar (26–27)','calendar-use-pack','btn btn-outline btn-full')}
+ ${btn(calendarConnected()?'↻ Refresh calendar list':'🔗 Connect Google Calendar','calendar-connect','btn btn-full')}
+ ${available.length?`<div class="field"><label for="calendar-pick">Calendar to display</label><select id="calendar-pick" class="select" data-change="calendar-pick">${option('','Choose a calendar',current)}${available.map(c=>option(c.id,c.name,current)).join('')}</select></div>`:''}
+ ${current?btn('↻ Refresh upcoming events','calendar-refresh','btn btn-outline btn-full'):''}
+ ${ui.calendarFetchedAt?`<div class="meta">Last refreshed: ${new Date(ui.calendarFetchedAt).toLocaleString()} · Google events live in memory only.</div>`:''}
+ ${!settings('googleClientId')?`<div class="privacy-strip">First enter your OAuth web client ID in Settings and enable Google Calendar API in your Google Cloud project.</div>${btn('Open settings','goto-settings','btn btn-ghost')}`:''}
+ <div class="privacy-strip">Access is read-only; Google requires your explicit permission. Only this device sees the selected calendar's private event details.</div></section>
+ <section class="panel stack"><span class="kicker">Alternatively</span><h2>Import an .ics snapshot</h2><p>Use a downloaded Scoutbook or other iCalendar (.ics) export. This creates a local snapshot, not a live subscription.</p>
+ <form data-form="calendar-ics" class="stack"><div class="field"><label for="ics-file">Choose iCalendar file</label><input id="ics-file" type="file" name="file" accept=".ics,text/calendar" class="input" required></div><button class="btn" type="submit">Import upcoming dates</button></form>
+ <div class="row-between"><span class="meta">${dbState.calendarEvents.length} events saved locally from iCalendar</span>${dbState.calendarEvents.length?btn('Clear .ics snapshot','clear-ics','btn btn-danger btn-small'):''}</div>
+ <div class="divider"></div><h3>Existing Pack calendar PDF</h3>${link(LINKS.calendar,'Open current Pack calendar PDF','btn btn-outline btn-full')}
+ ${link(LINKS.scoutbook,'Open Scoutbook Plus','btn btn-ghost btn-full')}
+ <div class="privacy-strip">Best approach: enter official events in Scoutbook and subscribe to its .ics calendar in Google Calendar. Do not duplicate official events in two systems.</div></section></div>`;
 }
+function budget(){return financeView({state:dbState,ui,esc,money,settings,intro,note,btn,link,field,select,textarea,empty,upcoming:upcomingRecords});}
 function budgetForm(){return `<h3>Add planning entry</h3><form data-form="budget" class="stack"><div class="form-grid">${field('Category','category','text','','required maxlength="100"')}${field('Planned amount ($)','planned','number','0','min="0" step="0.01" required')}${field('Entered actual ($)','actual','number','0','min="0" step="0.01" required')}${field('Notes','note')}</div><div class="form-actions"><button class="btn" type="submit">Save entry</button>${btn('Cancel','cancel-form')}</div></form>`}
 function receiptForm(){return `<section class="panel"><h2>Capture a receipt</h2><p>Save a photo or PDF into a local upload queue. Upload to the selected Pack Drive folder when Google access is connected.</p>
  <form data-form="receipt" class="stack"><div class="field"><label for="receiptFile">Receipt image or PDF · 15 MB max</label><input class="input" id="receiptFile" name="file" type="file" accept="image/*,application/pdf" required></div><div class="form-grid">${field('Vendor / store (optional)','vendor')}${field('Amount ($, optional)','amount','number','','min="0" step="0.01"')}${select('Related event','eventId',eventOptions())}${field('Description (optional)','note')}</div><div class="form-actions"><button class="btn" type="submit">🧾 Save receipt to upload queue</button></div></form></section>`}
 function receipts(){
  const records=[...dbState.receipts].sort((a,b)=>b.createdAt-a.createdAt);
  return `${intro('Snap • tag • save','Receipt Upload','Take a photo, connect it to an event, and send it to the Pack’s receipts folder.',link(LINKS.receipts2026,'Open 2026–27 receipts','btn btn-outline'))}
- <div class="split"><div class="stack">${receiptForm()}<section class="panel"><div class="row-between"><h2>Saved receipts</h2><span class="pill">${records.length} files</span></div>${records.length?records.map(r=>`<div class="receipt-row"><span class="receipt-emoji">🧾</span><div style="flex:1;min-width:0"><strong style="font-size:12px;overflow-wrap:anywhere">${esc(r.fileName)}</strong><div class="meta">${esc(r.vendor||'No vendor')} ${r.amount!==null?`· ${money(r.amount)}`:''} · ${new Date(r.createdAt).toLocaleDateString()}</div><div class="task-options">${r.state==='uploaded'?`<span class="pill success">Uploaded to Drive</span>${link(`https://drive.google.com/file/d/${encodeURIComponent(r.driveFileId)}/view`,'View file','btn btn-outline btn-small')}`:`<span class="pill ${r.state==='error'?'danger':'warning'}">${r.state==='error'?'Upload error':'Stored locally'}</span>${btn('Upload to Drive','upload-receipt','btn btn-small',`data-id="${r.id}"`)}`}${btn('View local','open-receipt','btn btn-ghost btn-small',`data-id="${r.id}"`)}${btn('Delete','delete-receipt','btn btn-danger btn-small',`data-id="${r.id}"`)}</div>${r.error?`<div class="meta" style="color:#a13c31;margin-top:7px">${esc(r.error)}</div>`:''}</div></div>`).join(''):empty('📷','No receipts yet','Add your first photo above. Files remain on this device until you upload them.')}</section></div>
+ <div class="split"><div class="stack">${receiptForm()}<section class="panel"><div class="row-between"><h2>Saved receipts</h2><span class="pill">${records.length} files</span></div>${records.length?records.map(r=>`<div class="receipt-row"><span class="receipt-emoji">🧾</span><div style="flex:1;min-width:0"><strong style="font-size:12px;overflow-wrap:anywhere">${esc(r.fileName)}</strong><div class="meta">${esc(r.vendor||'No vendor')} ${r.amount!==null?`· ${money(r.amount)}`:''} · ${new Date(r.createdAt).toLocaleDateString()}</div><div class="task-options">${r.state==='uploaded'?`<span class="pill success">Uploaded to Drive</span>${link(`https://drive.google.com/file/d/${encodeURIComponent(r.driveFileId)}/view`,'View file','btn btn-outline btn-small')}`:`<span class="pill ${r.state==='error'?'danger':'warning'}">${r.state==='error'?'Upload error':'Stored locally'}</span>${btn('Upload to Drive','upload-receipt','btn btn-small',`data-id="${r.id}"`)}`}${btn('View local','open-receipt','btn btn-ghost btn-small',`data-id="${r.id}"`)}${btn('Itemize','receipt-itemize','btn btn-outline btn-small',`data-id="${r.id}"`)}${btn('Delete','delete-receipt','btn btn-danger btn-small',`data-id="${r.id}"`)}</div>${r.error?`<div class="meta" style="color:#a13c31;margin-top:7px">${esc(r.error)}</div>`:''}
+ ${ui.receiptItemsId===r.id?`<form data-form="receipt-item" data-id="${esc(r.id)}" class="finance-itemize stack"><strong>Receipt line items · Review manually</strong><p>Enter items as printed on the receipt. OCR extraction is not enabled in this version; these items do NOT create separate ledger expenses.</p><div class="form-grid">${field('Item description','itemName','text','','required maxlength="120"')}${field('Quantity','quantity','number','1','min="0.01" step="0.01" required')}${field('Unit price ($)','unitPrice','number','','min="0" step="0.01" required')}${select('Expense category','category',EXPENSE_CATEGORIES.map(c=>[c,c]))}</div><div class="form-actions"><button class="btn" type="submit">Add line item</button>${btn('Close','receipt-itemize-close','btn btn-outline btn-small')}</div>
+ ${(r.items||[]).map((item,i)=>`<div class="row-between"><span>${esc(item.name)} · ${esc(item.quantity)} × ${money(item.unitPrice)} · ${esc(item.category)}</span>${btn('Remove','receipt-item-delete','btn btn-ghost btn-small',`data-id="${esc(r.id)}" data-index="${i}"`)}</div>`).join('')}
+ <div class="finance-alert"><strong>Item total: ${money((r.items||[]).reduce((t,item)=>t+Number(item.quantity)*Number(item.unitPrice),0))}</strong><small>Receipt total: ${r.amount===null?'Unknown':money(r.amount)}. Compare before submitting a reimbursement. Discounts and tax can be recorded as additional line items.</small></div></form>`:''}
+ </div></div>`).join(''):empty('📷','No receipts yet','Add your first photo above. Files remain on this device until you upload them.')}</section></div>
  <div class="stack"><section class="panel stack"><span class="kicker">Destination</span><h2>Pack Drive • Receipts</h2><p>We found the Pack's existing receipts folder with a 2026–27 subfolder.</p>${link(LINKS.receiptRoot,'Browse receipts folder','btn btn-ghost btn-full')}<div class="privacy-strip">${settings('googleFolder')?`Selected upload destination: <strong>${esc(settings('googleFolderName')||settings('googleFolder'))}</strong>`:'To upload directly, open Settings, enter your own Google Cloud OAuth configuration, sign in, and explicitly select the receipts destination using Google Picker.'}</div>${btn('⚙ Configure Drive upload','goto-settings','btn btn-outline btn-full')}</section><section class="panel"><h3>Upload behavior</h3><p>A local copy is preserved after upload. Nothing is uploaded just by adding it here. PackOps does not automatically enter receipts into the treasurer ledger.</p></section></div></div>`;
 }
 function meeting(){
@@ -131,13 +161,27 @@ function events(){const chosen=ui.eventId&&findEvent(ui.eventId);if(chosen)retur
 
 // Functional first-version modules. Youth membership records remain device-local and are never uploaded.
 function roster(){
- const q=ui.rosterFilter.toLowerCase();const rows=dbState.roster.filter(r=>(r.name+' '+r.den+' '+r.guardian).toLowerCase().includes(q));
- return `${intro('Private leadership reference','Pack Roster','Search an authorized local copy of the roster. Scoutbook Plus remains the official membership source.',link(LINKS.scoutbook,'Open Scoutbook Plus'))}
- ${note('Youth roster information is sensitive. CSV imports are stored only in this browser, without a central login or encryption; use a trusted leader-only device. Never share an imported roster through a public PackOps deployment.',true)}
- <div class="split"><div class="stack"><section class="panel stack"><div class="row-between"><h2>Import & review</h2><span class="pill">${dbState.roster.length} local entries</span></div><p>Supports Scoutbook-style CSV exports, including reports that begin with a title row before the real column headings. Ambiguous names and missing fields are flagged instead of silently repaired.</p><form data-form="roster" class="stack"><div class="field"><label for="roster-file">Scoutbook roster (.csv)</label><input class="input" type="file" id="roster-file" name="file" accept=".csv,text/csv,text/plain" required></div><div class="form-actions"><button class="btn" type="submit">Preview CSV issues</button>${btn('Clear local roster','clear-roster','btn btn-danger')}</div></form>
- ${ui.rosterPreview?`<div class="preview-strip"><strong>${ui.rosterPreview.records.length} records found</strong><span class="pill warning">${ui.rosterPreview.warnings.length} need review</span></div><p>${esc(importPrivacySummary(ui.rosterPreview))}</p><div class="review-list">${ui.rosterPreview.warnings.slice(0,25).map(w=>`<div class="list-item"><strong>CSV row ${w.row}</strong><div class="meta">${esc(w.issues.join('; '))}</div></div>`).join('')}${ui.rosterPreview.warnings.length>25?`<p>Showing first 25 warnings of ${ui.rosterPreview.warnings.length}.</p>`:''}</div>${btn('Import locally — keep flagged rows','commit-roster','btn btn-full')}`:''}</section>
- <section class="panel"><div class="row-between"><h2>Roster directory</h2><span class="pill">${rows.length} shown</span></div><input class="input" style="margin:10px 0" type="search" name="roster-search" value="${esc(ui.rosterFilter)}" placeholder="Search name, den, guardian…" aria-label="Search roster">${rows.length?rows.slice(0,150).map(r=>`<div class="list-item"><div class="row-between"><strong>${esc(r.name)}</strong><span class="pill ${r.issues?.length?'warning':''}">${esc(r.den||'Den unknown')}</span></div><div class="meta">Guardian: ${esc(r.guardian||'Needs review')}${r.issues?.length?' · ⚠ '+r.issues.length+' flag(s)':''}</div>${r.phone?`<div class="meta">Phone: ${esc(r.phone)}</div>`:''}${r.email?`<div class="meta">Email: ${esc(r.email)}</div>`:''}</div>`).join(''):empty('📒','No matching roster entries','Select an authorized CSV and review its issues before importing.')} ${rows.length>150?'<p class="muted">Showing first 150 matching entries.</p>':''}</section></div>
- <section class="panel stack"><h2>Why import carefully?</h2><p>The Pack may have siblings, duplicate records, multiple guardian rows, incomplete contact information, or inconsistent rank labels. We preserve uncertain entries and show review warnings rather than guessing.</p><p>Imported contacts are not automatically used to send messages or share files.</p>${link(LINKS.packDrive,'Open Pack leadership Drive','btn btn-ghost btn-full')}<div class="privacy-strip">The local copy does not synchronize with Scoutbook. Re-import an authorized new report to refresh it.</div></section></div>`;
+ const rows=rosterRows(),scouts=groupScouts(dbState.roster),rawDens=[...new Set(scouts.map(r=>r.den||'Unassigned'))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+ const ranks=[...new Set(scouts.map(r=>r.rank||'Unspecified'))].sort();
+ const selected=ui.rosterSelected.size,visibleSelected=rows.filter(r=>ui.rosterSelected.has(r.id)).length;
+ return `${intro('Private leadership reference','Pack Roster','Filter by exact den or rank, sort Scout records, and export only the selected fields and Scouts.',link(LINKS.scoutbook,'Official Scoutbook roster'))}
+ ${note('<strong>Private roster:</strong> Copies remain in this device’s browser storage. No server-side access control exists in v0.2. Do not use this on shared devices; never commit Scout CSVs or exported contact lists to GitHub.',true)}
+ <section class="panel stack"><div class="row-between"><h2>Import & review</h2><span class="pill">${scouts.length} unique Scouts · ${dbState.roster.length} source rows</span></div><p>Supports the October 10 Scoutbook export: den labels such as “Webelos 2,” “Wolf 6” and “1” stay exactly as exported. Den/rank disagreements and ambiguous den numbers are flagged for review, not silently corrected.</p>
+ <form data-form="roster" class="row wrap"><div class="field" style="flex:1;min-width:240px"><label for="roster-file">Scoutbook roster (.csv)</label><input class="input" type="file" id="roster-file" name="file" accept=".csv,text/csv,text/plain" required></div><button class="btn" type="submit">Preview CSV issues</button>${dbState.roster.length?btn('Clear local roster','clear-roster','btn btn-danger'):''}</form>
+ ${ui.rosterPreview?`<div class="preview-strip"><strong>${ui.rosterPreview.records.length} Scout records found</strong><span class="pill warning">${ui.rosterPreview.warnings.length} flagged rows</span></div><p>${esc(importPrivacySummary(ui.rosterPreview))}</p><div class="review-list">${ui.rosterPreview.warnings.slice(0,20).map(w=>`<div class="list-item"><strong>CSV row ${w.row}</strong><div class="meta">${esc(w.issues.join('; '))}</div></div>`).join('')}</div>${btn('Import working copy — keep flagged rows','commit-roster','btn btn-full')}`:''}</section>
+ <section class="panel stack" style="margin-top:20px"><div class="row-between"><h2>Scout directory</h2><span class="pill">${rows.length} matching · <span class="roster-selected-count">${selected}</span> selected</span></div>
+ <div class="roster-filters"><div class="field"><label>Search</label><input class="input" type="search" name="roster-search" value="${esc(ui.rosterFilter)}" placeholder="Name, parent, den, email…"></div>
+ <div class="field"><label>Den (as exported)</label><select class="select" data-change="roster-den">${option('all','All dens',ui.rosterDen)}${rawDens.map(d=>option(d,d+' ('+scouts.filter(r=>(r.den||'Unassigned')===d).length+')',ui.rosterDen)).join('')}</select></div>
+ <div class="field"><label>Rank</label><select class="select" data-change="roster-rank">${option('all','All ranks',ui.rosterRank)}${ranks.map(r=>option(r,r,ui.rosterRank)).join('')}</select></div>
+ <div class="field"><label>Sort by</label><select class="select" data-change="roster-sort">${[['name','Scout name'],['den','Den'],['rank','Rank'],['guardian','Guardian'],['issues','Review flags']].map(([v,t])=>option(v,t,ui.rosterSort)).join('')}</select></div></div>
+ <label class="review-toggle"><input type="checkbox" data-change="roster-review" ${ui.rosterReview?'checked':''}> Show flagged records only</label>
+ <div class="row wrap"><button type="button" data-action="roster-select-all" class="btn btn-outline btn-small">Select all ${rows.length} matching</button>${btn('Clear selection','roster-select-none','btn btn-ghost btn-small')}</div>
+ ${rows.length?`<div class="roster-table-wrap"><table class="roster-table"><thead><tr><th scope="col">Select</th><th scope="col">Scout</th><th scope="col">Den</th><th scope="col">Rank</th><th scope="col">Guardian</th><th scope="col">Review</th></tr></thead><tbody>${rows.map(r=>`<tr><td><input type="checkbox" data-change="roster-select" data-id="${esc(r.id)}" aria-label="Select ${esc(r.name)}" ${ui.rosterSelected.has(r.id)?'checked':''}></td><td><strong>${esc(r.name)}</strong></td><td>${esc(r.den||'Unassigned')}</td><td>${esc(r.rank||'—')}</td><td>${esc(r.guardianContacts?.map(g=>g.name).filter(Boolean).join('; ')||r.guardian||'—')}<div class="meta">${esc(r.guardianContacts?.map(g=>g.email||g.phone).filter(Boolean).join('; ')||r.email||r.phone||'Contact not listed')}</div></td><td>${(r.issues||[]).length?`<span class="pill warning" title="${esc(r.issues.join('; '))}">${r.issues.length} flag(s)</span>`:'<span class="pill success">OK</span>'}</td></tr>`).join('')}</tbody></table></div>`:empty('📒','No matching Scouts','Import your authorized CSV, or adjust the search and den/rank filters.')}
+ <div class="privacy-strip">Selection persists when you switch filters. ${visibleSelected} selected Scouts match the current view. Unknown den labels are not automatically reassigned to any rank.</div></section>
+ <section class="panel stack" style="margin-top:20px"><div class="row-between"><h2>Export selected Scouts</h2><span class="pill"><span class="roster-selected-count">${selected}</span> selected</span></div><p>Export a CSV file for your own authorized Pack work. Choose the minimum necessary information. No export is sent to Google Drive or the public repository.</p>
+ <div class="field"><label for="roster-export-fields">Fields to include</label><select id="roster-export-fields" class="select"><option value="names">Scout names + den + rank (no contacts)</option><option value="contacts">Scout name + den + guardian + email + phone</option><option value="review">Scout name + den + rank + review warnings</option></select></div>
+ ${btn('Export '+selected+' selected Scouts (.csv)','roster-export','btn',selected?'':'disabled')}
+ ${!selected?'<span class="meta">Select Scouts above before exporting.</span>':''}</section>`;
 }
 function equipment(){
  const rows=[...dbState.equipment].sort((a,b)=>a.name.localeCompare(b.name));
@@ -150,7 +194,7 @@ function assistant(){
  return `${intro('A clearer next move','Cubmaster Assistant','Priorities based on the actual tasks you entered in PackOps—not imagined Scoutbook information.',btn('Copy working brief','copy-brief','btn'))}
  <div class="stats"><div class="stat"><div><strong>${s.overdue.length}</strong><span>Overdue</span></div></div><div class="stat"><div><strong>${s.unassigned.length}</strong><span>Need owners</span></div></div><div class="stat"><div><strong>${s.dueSoon.length}</strong><span>Due within seven days</span></div></div></div>
  <div class="split"><section class="panel"><div class="row-between"><h2>What needs attention?</h2><span class="pill">${issue.length} priorities</span></div>${issue.length?issue.map(t=>`<div class="list-item"><div class="row-between"><strong>${esc(t.title)}</strong><span class="pill ${s.overdue.includes(t)?'danger':'warning'}">${s.overdue.includes(t)?'Overdue':!t.owner?'Unassigned':'Coming due'}</span></div><div class="meta">${esc(t.owner||'No owner')} · ${t.due?niceDate(t.due):'No due date'} · ${esc(eventLabel(t.eventId))}</div></div>`).join(''):empty('✨','Nothing urgent recorded','Add tasks and deadlines, and this briefing will start surfacing priorities.')}</section>
- <section class="panel stack"><h2>Working briefing</h2><p>Generated from this device's locally saved events and assignments. Official Scoutbook and shared Google Sheets are not being scanned automatically.</p><pre class="code-example" style="max-height:420px;overflow:auto">${esc(brief(dbState.tasks,dbState.events))}</pre>${btn('Copy briefing text','copy-brief','btn btn-full')}${link(LINKS.operations,'Check official ownership plan','btn btn-outline btn-full')}</section></div>`;
+ <section class="panel stack"><h2>Working briefing</h2><p>Generated from locally recorded assignments plus events currently loaded in the calendar section. Scoutbook and the shared Google Sheets are not scanned automatically.</p><pre class="code-example" style="max-height:420px;overflow:auto">${esc(brief(dbState.tasks,upcomingRecords()))}</pre>${btn('Copy briefing text','copy-brief','btn btn-full')}${link(LINKS.operations,'Check official ownership plan','btn btn-outline btn-full')}</section></div>`;
 }
 function library(){
  const fixed=[['🗓️','Current Pack calendar',LINKS.calendar,'Updated master calendar PDF'],['📁','Leadership Drive',LINKS.packDrive,'Pack documents and folders'],['📊','Treasurer ledger',LINKS.ledger,'Official financial records'],['🧾','Receipts (2026–27)',LINKS.receipts2026,'Current financial uploads'],['📋','Operations & Ownership Plan',LINKS.operations,'Pack work and accountability'],['🏕️','Event Tracker',LINKS.eventTracker,'Existing planning tracker'],['⚜️','Scoutbook Plus',LINKS.scoutbook,'Official Pack management'],['🚩','Flag Ceremony Reference',LINKS.flagGuide,'Scouting America resource']];
@@ -161,18 +205,122 @@ function library(){
 }
 function settingsPage(){
  return `${intro('Your device and Drive','Settings','Local privacy controls and optional, user-authorized Google Drive receipt uploads.')}
- <div class="split"><section class="panel stack"><h2>Connect receipt uploading</h2><p>To make direct Google Drive uploads work, create a Google Cloud OAuth web client for your published PackOps site, enable Drive API and Picker API, then supply its client ID and browser API key here. Tokens stay in memory; no credentials are built into the published code.</p>
+ <div class="split"><section class="panel stack"><h2>Connect Google services</h2><p>For receipt uploads, enable Drive API and Picker API. For upcoming events, enable Google Calendar API and grant calendar.readonly access. Use a Google OAuth Web Client ID authorized for your PackOps website. Tokens stay in memory; never enter client secrets.</p><p>Calendar connection status: <strong>${calendarConnected()?'Authorized for this session':'Not connected'}</strong>. Open Pack Calendar to select a calendar.</p>
  <form data-form="google-settings" class="stack">${field('Google OAuth web client ID','googleClientId','text',settings('googleClientId'))}${field('Google Picker API key','googleApiKey','text',settings('googleApiKey'))}<button class="btn" type="submit">Save configuration on this device</button></form>
  <p>Status: <strong>${connected()?'Authorized for this session':'Not connected'}</strong></p>${btn('Sign in to Google','google-sign-in','btn btn-full')}${btn('Choose 2026–27 receipts destination','google-pick-folder','btn btn-outline btn-full')}${settings('googleFolder')?`<p class="setting-kv">Chosen destination: ${esc(settings('googleFolderName'))} (${esc(settings('googleFolder'))})</p>`:''}${btn('Disconnect','google-disconnect','btn btn-ghost btn-full')}
  <div class="privacy-strip">You must explicitly authorize the app and select the proper destination folder. The Drive API only uploads receipts when you click Upload. There is no background access to roster files or finances.</div></section>
- <section class="panel stack"><h2>Data & privacy</h2><p>This first version saves event plans, roster copies, budgets, volunteer tasks, and receipts in this browser's IndexedDB. Clearing browser storage removes local data. Different devices do not yet synchronize these records.</p><p>Never import private youth records onto shared or public devices. This version has no server-based role permissions.</p>${btn('Clear all local working data','clear-local','btn btn-danger btn-full')}${link(LINKS.packDrive,'Open authorized Pack Drive','btn btn-outline btn-full')}</section></div>`;
+ <section class="panel stack"><h2>Data & privacy</h2><p>This version saves event plans, roster copies, budgets, Scout credit snapshots, reimbursement proposals, volunteer tasks, and receipts in this browser's IndexedDB. Clearing browser storage removes local data. Different devices do not yet synchronize these records.</p><p>Never import private youth records onto shared or public devices. This version has no server-based role permissions.</p>${btn('Clear all local working data','clear-local','btn btn-danger btn-full')}${link(LINKS.packDrive,'Open authorized Pack Drive','btn btn-outline btn-full')}</section></div>`;
 }
 
 function askDelete(message){return window.confirm(message)}
 async function handleAction(action,trigger){
  const id=trigger.dataset.id;
  switch(action){
+  case 'receipt-itemize':ui.receiptItemsId=id;render();return;
+  case 'receipt-itemize-close':ui.receiptItemsId='';render();return;
+  case 'receipt-item-delete':{
+   const receipt=dbState.receipts.find(r=>r.id===id),i=Number(trigger.dataset.index);
+   if(receipt?.items?.[i]&&askDelete('Remove this locally itemized receipt line?')){await put('receipts',{...receipt,items:receipt.items.filter((_,j)=>i!==j)});await refresh()}return;
+  }
+  case 'finance-tab':ui.financeTab=id;ui.financeForm='';render();return;
+  case 'finance-seed-template':{
+   if(dbState.budget.length){notify('Your planning budget is not empty. The template was not loaded, to protect your current work.',true);return;}
+   if(!askDelete('Create 24 DRAFT budget lines from your uploaded 2026–27 template? This will NOT alter the treasurer ledger or officially approve a budget.'))return;
+   for(const line of TEMPLATE_ROWS)await put('budget',{...line,id:makeId(),createdAt:now()});
+   await writeSetting('financeDues',String(TEMPLATE_META.annualDues));
+   await writeSetting('financeFundraisingTarget',String(TEMPLATE_META.fundraisingProceedsTarget));
+   await writeSetting('financeFundraisingCommission',String(TEMPLATE_META.commissionRate));
+   await writeSetting('financeFundraisingScouts',String(TEMPLATE_META.members));
+   await writeSetting('financeTemplateSource','Budget Planner.xlsx – proposed 2026–27 budget');
+   await refresh();notify('Imported template planning lines as unapproved drafts');return;
+  }
+  case 'finance-goto-builder':ui.financeTab='builder';render();return;
+  case 'finance-new-budget':ui.financeForm='budget';render();return;
+  case 'finance-close':ui.financeForm='';render();return;
+  case 'finance-delete-budget':if(askDelete('Remove this LOCAL planning budget line?')){await remove('budget',id);await refresh()}return;
+  case 'finance-baseline':{
+   if(!askDelete('Record the current LOCAL budget as your reviewed baseline? This does not constitute committee approval or update Google Drive.'))return;
+   const v=financialSnapshot({budget:dbState.budget,ledger:dbState.financeLedger,tags:dbState.financeTags,reimbursements:dbState.financeReimbursements});
+   await writeSetting('financeBaselineExpenses',String(v.plannedExpenses));await writeSetting('financeBaselineDate',isoToday());await refresh();notify('Reviewed planning baseline recorded locally');return;
+  }
+  case 'finance-fetch-accounts':{
+   if(!window.confirm('Scout credit information is sensitive. Continue ONLY on your private, trusted device? This version stores the imported snapshot locally without centrally enforced roles.'))return;
+   trigger.disabled=true;trigger.textContent='Reading authorized Sheet…';
+   const result=await fetchScoutCreditSnapshot(settings('googleClientId'));
+   const parsed=parseScoutCreditsCsv(result.csv,amount(settings('financeDues')||105));
+   if(!window.confirm(`Refresh ${parsed.scouts.length} Scout credit records on this device? Previous local snapshot will be replaced. The original Google Sheet will not change.`))return;
+   for(const row of dbState.financeAccounts)await remove('financeAccounts',row.id);
+   for(const row of parsed.scouts)await put('financeAccounts',row);
+   await writeSetting('financeAccountsImportedAt',result.syncedAt);
+   await refresh();notify(`Refreshed ${parsed.scouts.length} Scout account records from Google (read-only)`);return;
+  }
+  case 'finance-delete-adjustment':if(askDelete('Delete this local proposed Scout account adjustment?')){await remove('financeAdjustments',id);await refresh()}return;
+  case 'finance-export-adjustments':{
+   if(!dbState.financeAdjustments.length)throw Error('No proposed adjustments found');
+   if(!askDelete('Export Scout financial adjustment proposals for the authorized treasurer? Treat the CSV as confidential.'))return;
+   const rows=dbState.financeAdjustments.map(r=>({Scout:dbState.financeAccounts.find(x=>x.id===r.accountId)?.name||'Unmatched',Date:r.date,Amount:r.delta,Reason:r.reason,Status:'Proposed - NOT POSTED'}));
+   downloadCsv(csvExport(rows,['Scout','Date','Amount','Reason','Status']),`Pack179_Scout_Adjustment_Proposals_${isoToday()}.csv`);return;
+  }
+  case 'finance-clear-accounts':if(askDelete('Remove the local Scout credit snapshot from this device? Official Drive records are unchanged.')){for(const item of dbState.financeAccounts)await remove('financeAccounts',item.id);await writeSetting('financeAccountsImportedAt','');await refresh();notify('Local Scout credit copy deleted')}return;
+  case 'finance-export-accounts':{
+   const q=ui.accountQuery.trim().toLowerCase(),den=ui.accountDen;
+   const rows=dbState.financeAccounts.filter(r=>(den==='all'||r.den===den)&&[r.name,r.den].some(x=>String(x||'').toLowerCase().includes(q))).map(r=>({Scout:r.name,Den:r.den,Carryover:r.carryover,Popcorn:r.earnings,Balance:r.balance??'Needs review'}));
+   if(!rows.length)throw Error('No Scout credit records to export.');
+   if(!askDelete('This CSV contains individual Scout financial balances. Download only to an access-controlled device and storage location?'))return;
+   downloadCsv(csvExport(rows,['Scout','Den','Carryover','Popcorn','Balance']),`Pack179_Scout_Account_Review_${isoToday()}.csv`);notify('Restricted Scout credit CSV downloaded');return;
+  }
+  case 'finance-review-request':{
+   const rec=dbState.financeReimbursements.find(x=>x.id===id);if(rec){await put('financeReimbursements',{...rec,status:'reviewed',updatedAt:now()});await refresh();notify('Marked reviewed locally (not an official approval)')}return;
+  }
+  case 'finance-decline-request':{
+   const rec=dbState.financeReimbursements.find(x=>x.id===id);if(rec&&askDelete('Mark this reimbursement as declined in the LOCAL queue?')){await put('financeReimbursements',{...rec,status:'declined',updatedAt:now()});await refresh()}return;
+  }
+  case 'finance-pay-request':{
+   const rec=dbState.financeReimbursements.find(x=>x.id===id),ledgerId=root.querySelector('[data-ledger-select="'+CSS.escape(id)+'"]')?.value;
+   if(!rec)throw Error('Reimbursement not found');
+   const matched={...rec,ledgerId};
+   if(!reimbursePaidAllowed(matched,dbState.financeLedger,dbState.financeTags))throw Error('Choose a categorized ledger expense with an exact matching amount; payment cannot be verified otherwise.');
+   if(dbState.financeReimbursements.some(x=>x.id!==id&&x.status==='paid'&&x.ledgerId===ledgerId))throw Error('This ledger transaction is already matched to another paid reimbursement.');
+   if(!askDelete('Mark paid in this LOCAL PackOps working queue after verifying the actual ledger transaction? This will NOT edit the treasurer ledger.'))return;
+   await put('financeReimbursements',{...matched,status:'paid',paidAt:now(),updatedAt:now()});await refresh();notify('Payment matched to local copy of the official ledger');return;
+  }
+  case 'finance-export-report':{
+   const s=financialSnapshot({budget:dbState.budget,ledger:dbState.financeLedger,tags:dbState.financeTags,reimbursements:dbState.financeReimbursements});
+   downloadCsv(csvExport(reportsRows(s),['Category','Planned','Actual','Variance']),`Pack179_Committee_Budget_${isoToday()}.csv`);notify('Committee category-only report exported');return;
+  }
+  case 'finance-print-report':window.print();return;
   case 'goto-settings':route('settings');return;
+  case 'goto-calendar':route('calendar');return;
+  case 'install-pwa':{
+   if(pwaInstallPrompt){pwaInstallPrompt.prompt();await pwaInstallPrompt.userChoice;pwaInstallPrompt=null;render();return;}
+   notify('On Android Chrome, open the browser menu (⋮) and choose Install app. If installed already, launch the PackOps icon on your home screen.');return;
+  }
+  case 'calendar-use-pack':{
+   await writeSetting('calendarId',PACK_CALENDAR_ID);await writeSetting('calendarName','Pack 179 Calendar (26–27)');
+   ui.calendarFetchedAt=0;ui.googleEvents=[];await refresh();
+   if(settings('googleClientId')){try{ui.googleEvents=await calendarUpcoming(settings('googleClientId'),PACK_CALENDAR_ID);ui.calendarFetchedAt=now();await refresh();notify(`Loaded ${ui.googleEvents.length} Pack 179 calendar events`)}catch(e){notify('Pack calendar selected. To fetch events, authorize Google Calendar: '+e.message,true)}}
+   else notify('Pack calendar selected. Add your OAuth Client ID in Settings to read events.');return;
+  }
+  case 'calendar-connect':{
+   const clientId=settings('googleClientId');ui.calendars=await calendarList(clientId);
+   notify(`Found ${ui.calendars.length} accessible calendars. Choose one below.`);render();return;
+  }
+  case 'calendar-refresh':{
+   const calendarId=settings('calendarId');if(!calendarId)throw Error('Select a calendar first');
+   ui.googleEvents=await calendarUpcoming(settings('googleClientId'),calendarId);ui.calendarFetchedAt=now();render();notify(`Loaded ${ui.googleEvents.length} upcoming events (read-only)`);return;
+  }
+  case 'clear-ics':if(askDelete('Remove the locally imported iCalendar snapshot? No Google Calendar events will be modified.')){for(const e of dbState.calendarEvents)await remove('calendarEvents',e.id);await refresh();notify('Local calendar snapshot removed')}return;
+  case 'roster-select-all':for(const r of rosterRows())ui.rosterSelected.add(r.id);render();return;
+  case 'roster-select-none':ui.rosterSelected.clear();render();return;
+  case 'roster-export':{
+   const rows=groupScouts(dbState.roster).filter(r=>ui.rosterSelected.has(r.id));if(!rows.length)throw Error('Select at least one Scout to export.');
+   const mode=root.querySelector('#roster-export-fields')?.value||'names';
+   const cols=mode==='contacts'?['name','den','guardian','email','phone']:mode==='review'?['name','den','rank','issues']:['name','den','rank'];
+   if(mode==='contacts'&&!window.confirm('This export contains guardian contact details. Save it only in an access-controlled location. Continue?'))return;
+   const content=exportRoster(rows,cols),blob=new Blob(['\ufeff'+content],{type:'text/csv;charset=utf-8'});
+   const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`Pack179_selected_scouts_${isoToday()}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+   notify(`Exported ${rows.length} selected Scouts locally`);return;
+  }
   case 'goto-assistant':route('assistant');return;
   case 'show-budget':ui.form='budget';render();return;
   case 'show-task':ui.form='task';ui.editTask='';render();return;
@@ -197,9 +345,9 @@ async function handleAction(action,trigger){
   case 'meeting-edit':ui.editMeeting=!ui.editMeeting;render();return;
   case 'meeting-reset':if(askDelete('Reset your personal meeting script overrides?')){for(const s of MEETING)await writeSetting('meeting:'+s.id,'');await refresh()}return;
   case 'print':window.print();return;
-  case 'copy-brief':await navigator.clipboard.writeText(brief(dbState.tasks,dbState.events));notify('Working briefing copied');return;
-  case 'clear-roster':if(askDelete('Remove the entire imported roster from this browser?')){for(const r of dbState.roster)await remove('roster',r.id);ui.rosterPreview=null;await refresh()}return;
-  case 'commit-roster':if(!ui.rosterPreview)return; if(!askDelete(`Replace the local roster with ${ui.rosterPreview.records.length} entries? Flagged records will remain flagged for review.`))return;for(const r of dbState.roster)await remove('roster',r.id);for(const r of ui.rosterPreview.records)await put('roster',r);ui.rosterPreview=null;await refresh();notify('Local roster imported; official Scoutbook roster unchanged');return;
+  case 'copy-brief':await navigator.clipboard.writeText(brief(dbState.tasks,upcomingRecords()));notify('Working briefing copied');return;
+  case 'clear-roster':if(askDelete('Remove the entire imported roster from this browser?')){for(const r of dbState.roster)await remove('roster',r.id);ui.rosterPreview=null;ui.rosterSelected.clear();await refresh()}return;
+  case 'commit-roster':if(!ui.rosterPreview)return; if(!askDelete(`Replace the local roster with ${ui.rosterPreview.records.length} entries? Flagged records will remain flagged for review.`))return;for(const r of dbState.roster)await remove('roster',r.id);for(const r of ui.rosterPreview.records)await put('roster',r);ui.rosterPreview=null;ui.rosterSelected.clear();await refresh();notify('Local roster imported; official Scoutbook roster unchanged');return;
   case 'open-attachment':{const r=dbState.attachments.find(r=>r.id===id);if(r?.blob)openBlob(r.blob);return;}
   case 'open-receipt':{const r=dbState.receipts.find(r=>r.id===id);if(r?.blob)openBlob(r.blob);return;}
   case 'delete-receipt':if(askDelete('Remove this receipt from the LOCAL queue? Any uploaded Drive file will remain in Google Drive.')){await remove('receipts',id);await refresh()}return;
@@ -217,10 +365,66 @@ async function handleAction(action,trigger){
   case 'clear-local':if(askDelete('Permanently clear all LOCAL PackOps records on this device, including roster and queued receipts? This will not delete Google Drive files.')){await clearEverything();dbState.events=[];dbState.roster=[];ui.rosterPreview=null;await refresh();notify('All local PackOps records cleared')}return;
  }
 }
+function downloadCsv(content,fileName){
+ const blob=new Blob(['\ufeff'+content],{type:'text/csv;charset=utf-8'});
+ const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 function openBlob(blob){const url=URL.createObjectURL(blob);const opened=window.open(url,'_blank','noopener');if(!opened){const a=document.createElement('a');a.href=url;a.download='packops-file';a.click()}setTimeout(()=>URL.revokeObjectURL(url),60_000)}
 async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
+  case 'finance-budget':{
+   const v=Number(f('planned'));if(!Number.isFinite(v)||v<0||v>1e9)throw Error('Enter a valid planning amount');
+   await put('budget',{id:makeId(),category:f('category'),type:f('type'),planned:Math.round(v*100)/100,eventId:f('eventId'),year:f('year'),note:f('note'),createdAt:now()});ui.financeForm='';break;
+  }
+  case 'receipt-item':{
+   const receipt=dbState.receipts.find(r=>r.id===form.dataset.id);
+   if(!receipt)throw Error('Receipt not found');
+   const quantity=Number(f('quantity')),unitPrice=Number(f('unitPrice'));
+   if(!Number.isFinite(quantity)||quantity<=0||quantity>10000||!Number.isFinite(unitPrice)||unitPrice<0||unitPrice>1e7)throw Error('Enter valid quantity and unit price');
+   const item={id:makeId(),name:f('itemName'),quantity,unitPrice:Math.round(unitPrice*100)/100,category:f('category')};
+   await put('receipts',{...receipt,items:[...(receipt.items||[]),item]});break;
+  }
+  case 'finance-adjustment':{
+   const acc=dbState.financeAccounts.find(x=>x.id===f('accountId'));
+   if(!acc)throw Error('Select an imported Scout account first');
+   const delta=Number(f('delta'));if(!Number.isFinite(delta)||delta===0||Math.abs(delta)>1e6)throw Error('Enter a valid nonzero adjustment amount');
+   if(!f('reason'))throw Error('Enter a reason that Courtney can review');
+   await put('financeAdjustments',{id:makeId(),accountId:acc.id,delta:Math.round(delta*100)/100,date:f('date'),reason:f('reason'),status:'proposed',createdAt:now()});break;
+  }
+  case 'finance-reimbursement':{
+   const v=Number(f('amount'));if(!Number.isFinite(v)||v<=0||v>1e7)throw Error('Enter a valid reimbursement amount');
+   await put('financeReimbursements',{id:makeId(),requester:f('requester'),amount:Math.round(v*100)/100,date:f('date'),eventTitle:f('eventTitle'),category:f('category'),notes:f('notes'),receiptId:f('receiptId'),status:'submitted',createdAt:now()});break;
+  }
+  case 'finance-fundraising':{
+   const goal=Number(f('target')),rate=Number(f('rate')),members=Number(f('members'));
+   if(!Number.isFinite(goal)||goal<0||goal>1e8||!Number.isFinite(rate)||rate<=0||rate>100||!Number.isInteger(members)||members<1||members>2000)throw Error('Enter a valid proceeds target, commission percentage and number of Scouts');
+   await writeSetting('financeFundraisingTarget',String(goal));await writeSetting('financeFundraisingCommission',String(rate/100));await writeSetting('financeFundraisingScouts',String(members));break;
+  }
+  case 'finance-forecast':{
+   for(const name of ['futureIncome','futureExpenses','reserve','restricted']){const v=Number(f(name));if(!Number.isFinite(v)||v<0||v>1e9)throw Error('Use non-negative amounts for forecast assumptions.');}
+   await writeSetting('financeFutureIncome',f('futureIncome'));await writeSetting('financeFutureExpenses',f('futureExpenses'));await writeSetting('financeReserve',f('reserve'));await writeSetting('financeRestricted',f('restricted'));break;
+  }
+  case 'finance-import-ledger':{
+   const file=form.elements.file.files?.[0];if(!file||file.size>3*1024*1024)throw Error('Select a ledger CSV smaller than 3 MB');
+   const rows=parseLedgerCsv(await file.text());
+   if(!askDelete(`Replace local treasurer ledger snapshot with ${rows.length} rows? The original Drive workbook is never edited.`))return;
+   for(const row of dbState.financeLedger)await remove('financeLedger',row.id);
+   for(const row of rows)await put('financeLedger',row);
+   await writeSetting('financeLedgerImportedAt',new Date().toISOString());
+   await refresh();notify(`${rows.length} treasurer ledger entries imported read-only`);return;
+  }
+  case 'finance-import-accounts':{
+   const file=form.elements.file.files?.[0];if(!file||file.size>3*1024*1024)throw Error('Select a Scout credit CSV smaller than 3 MB');
+   if(!form.elements.privateDevice?.checked)throw Error('Use a private, trusted device');
+   const dues=Number(f('dues'));if(!Number.isFinite(dues)||dues<0||dues>10000)throw Error('Use a valid annual dues assumption');
+   const parsed=parseScoutCreditsCsv(await file.text(),dues);
+   if(!askDelete(`Replace LOCAL Scout credit snapshot with ${parsed.scouts.length} records? ${parsed.continuationRows} guardian continuation rows are intentionally not stored in finance.`))return;
+   for(const row of dbState.financeAccounts)await remove('financeAccounts',row.id);
+   for(const row of parsed.scouts)await put('financeAccounts',row);
+   await writeSetting('financeDues',String(dues));await writeSetting('financeAccountsImportedAt',new Date().toISOString());
+   await refresh();notify(`Imported ${parsed.scouts.length} Scout financial records locally`);return;
+  }
   case 'budget':await put('budget',{id:makeId(),category:f('category'),planned:Number(f('planned')),actual:Number(f('actual')),note:f('note')});break;
   case 'task':{
    const old=dbState.tasks.find(t=>t.id===form.dataset.editId);
@@ -243,6 +447,16 @@ async function handleForm(form){
   case 'equipment':await put('equipment',{id:makeId(),name:f('name'),location:f('location'),holder:f('holder'),condition:f('condition'),notes:f('notes')});break;
   case 'bookmark':if(!safeUrl(f('url')))throw Error('Enter a valid HTTP(S) link');await put('bookmarks',{id:makeId(),label:f('label'),url:f('url'),description:f('description')});break;
   case 'google-settings':await writeSetting('googleClientId',f('googleClientId'));await writeSetting('googleApiKey',f('googleApiKey'));notify('Google configuration saved locally');break;
+  case 'calendar-ics':{
+   const file=form.elements.file.files?.[0];if(!file)throw Error('Choose an .ics file');
+   if(file.size>2*1024*1024)throw Error('Calendar file is larger than 2 MB');
+   const parsed=parseIcs(await file.text());
+   const nowdate=isoToday(),future=parsed.filter(e=>e.date>=nowdate);
+   if(!window.confirm(`Replace the locally imported calendar snapshot with ${future.length} upcoming events? This won't affect Google Calendar.`))return;
+   for(const e of dbState.calendarEvents)await remove('calendarEvents',e.id);
+   for(const e of future)await put('calendarEvents',e);
+   await refresh();notify(`Imported ${future.length} upcoming calendar dates locally`);return;
+  }
   case 'roster':{
    const file=form.elements.file.files?.[0];if(!file)throw Error('Choose a CSV roster');if(file.size>5*1024*1024)throw Error('Roster CSV exceeds 5 MB limit');
    ui.rosterPreview=parseRoster(await file.text());ui.form='';render();notify(importPrivacySummary(ui.rosterPreview));return;
@@ -262,16 +476,46 @@ root.addEventListener('submit',async event=>{
  try{await handleForm(form)}catch(error){console.error(error);notify(String(error?.message||error),true)}finally{if(button?.isConnected)button.disabled=false}
 });
 root.addEventListener('change',async event=>{
- const target=event.target;if(target.dataset.change==='task-status'){
+ const target=event.target;
+ if(target.dataset.change==='finance-account-den'){ui.accountDen=target.value;render();return}
+ if(target.dataset.change==='finance-account-sort'){ui.accountSort=target.value;render();return}
+ if(['finance-tag-kind','finance-tag-category','finance-tag-event'].includes(target.dataset.change)){
+  const id=target.dataset.tagId||target.dataset.tagCategory||target.dataset.tagEvent;
+  const old=dbState.financeTags.find(x=>x.id===id)||{id,kind:'unclassified',category:'',eventId:''};
+  const key=target.dataset.change==='finance-tag-kind'?'kind':target.dataset.change==='finance-tag-category'?'category':'eventId';
+  await put('financeTags',{...old,[key]:target.value,updatedAt:now()});await refresh();return;
+ }
+ if(target.dataset.change==='calendar-pick'){
+  const id=target.value,name=ui.calendars.find(c=>c.id===id)?.name||'Selected calendar';
+  await writeSetting('calendarId',id);await writeSetting('calendarName',name);ui.googleEvents=[];ui.calendarFetchedAt=0;
+  await refresh();if(id){try{ui.googleEvents=await calendarUpcoming(settings('googleClientId'),id);ui.calendarFetchedAt=now();render();notify(`Loaded ${ui.googleEvents.length} upcoming Google events`)}catch(e){notify(String(e.message),true)}}return;
+ }
+ if(target.dataset.change==='roster-select'){
+  if(target.checked)ui.rosterSelected.add(target.dataset.id);else ui.rosterSelected.delete(target.dataset.id);
+  const counts=root.querySelectorAll('.roster-selected-count');for(const c of counts)c.textContent=String(ui.rosterSelected.size);const b=root.querySelector('[data-action="roster-export"]');if(b){b.disabled=ui.rosterSelected.size===0;b.textContent=`Export ${ui.rosterSelected.size} selected Scouts (.csv)`;}
+  // Avoid re-rendering while a multi-select operation is underway; other indicators refresh on next filter change.
+  return;
+ }
+ if(target.dataset.change==='roster-den'){ui.rosterDen=target.value;render();return}
+ if(target.dataset.change==='roster-rank'){ui.rosterRank=target.value;render();return}
+ if(target.dataset.change==='roster-sort'){ui.rosterSort=target.value;render();return}
+ if(target.dataset.change==='roster-review'){ui.rosterReview=target.checked;render();return}
+ if(target.dataset.change==='task-status'){
   const task=dbState.tasks.find(t=>t.id===target.dataset.id);if(task){await put('tasks',{...task,status:target.value,updatedAt:now()});await refresh()}
  }
 });
 root.addEventListener('input',event=>{
+ if(event.target.name==='finance-account-search'){
+  const text=event.target.value,index=event.target.selectionStart;ui.accountQuery=text;render();
+  const el=root.querySelector('[name="finance-account-search"]');if(el){el.focus();el.setSelectionRange(index,index)}return;
+ }
  if(event.target.name==='roster-search'){
   const text=event.target.value,index=event.target.selectionStart;ui.rosterFilter=text;render();
   const el=root.querySelector('[name="roster-search"]');if(el){el.focus();el.setSelectionRange(index,index)}
  }
 });
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();pwaInstallPrompt=event;render()});
+window.addEventListener('appinstalled',()=>{pwaInstallPrompt=null;render();notify('PackOps installed as a standalone app')});
 window.addEventListener('hashchange',restoreRoute);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 refresh().then(restoreRoute).catch(err=>{

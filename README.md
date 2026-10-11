@@ -1,75 +1,97 @@
-# PackOps — Pack 179 Leadership Dashboard (v0.1)
+# PackOps 179 · v0.3 Finance Expansion
 
-A functioning, responsive desktop/mobile Progressive Web App (PWA) for Cub Scout leadership, built as a dependency-free static website. PackOps does **not** replace Scoutbook Plus.
+A mobile-first, installable leadership PWA for Pack 179. Public app code; **Pack documents and Scout financial data must remain private**.
 
-## Included right now
+## What's working in this build
 
-- Ten dashboard shortcuts: Pack Calendar, Budget, Upload Receipt, Pack Meeting, Volunteers, Event Status, Roster, Equipment, Cubmaster Assistant, and Pack Library.
-- **Live links** to the verified Pack 179 master calendar PDF, authorized leadership Drive folder, treasurer ledger, and year-specific receipts folder.
-- **Locally functioning** events, notes, attached files, checklists, volunteer roles, email drafts, budget planning entries, equipment, personal link shortcuts, and a weekly priorities/briefing view.
-- Reusable, customizable Pack Meeting cue sheet with quick/full views and browser print support.
-- Private **CSV roster import review** recognizing Scoutbook-like exports with a title row before the table headers; warns about missing fields, duplicate names, and invalid email, retaining uncertainty. No automatic merges. Scoutbook is still authoritative.
-- Receipt capture from camera/file picker into IndexedDB, followed by optional manual upload to a Google Picker-selected Drive folder. **Requires your own Google OAuth configuration and explicit login.**
-- Installable PWA with offline static shell cache.
+- The original ten-button PackOps dashboard, events and checklists, volunteers, printable meeting cue sheet, roster importer, equipment, library, and calendar connection.
+- **Pack Finance** with six connected screens: Overview, Budget Builder, Scout Accounts, Reimbursements, Ledger Review, and Reports & Forecasting.
+- **Budget Builder:** Annual income/expense allocations, optional PackOps event assignment, a locally recorded planning baseline. Includes one-click **seed from your uploaded 2026–27 Budget Planner** with $7,116 in proposed expenses, $4,305 planned dues, and a separately identified $3,000 popcorn proceeds goal. The $2,500 beginning-balance assumption is NOT recorded as income. Older local planning lines are preserved when upgrading.
+- **Official ledger snapshots:** CSV import (not editing Courtney's Excel workbook); classification as expense, income, transfer, or restricted allocation; optional category and PackOps event tags. Transfers are never automatically counted as spending.
+- **Scout accounts:** Either import the 2026–27 individual-credits sheet as CSV or explicitly authorize the app to read the Pack's existing Google Sheet via `spreadsheets.readonly`. Sort and filter by den, search, review mismatches, and export restricted views. The Google Sheets request deliberately excludes guardian contacts.
+- **Scout account adjustments:** Proposed credit/charge corrections with reason and export for treasurer review. They **do not change** the official sheet or the imported official balances.
+- **Reimbursements:** Submit a local request tied to a PackOps/Google Calendar event title, optionally attach an existing locally queued receipt; mark locally reviewed or declined; mark paid only after matching an imported categorized ledger expense of the same amount. **No payments are initiated.**
+- **Receipt uploads:** Capture photo/PDF to local IndexedDB, edit line-item descriptions, quantities, unit prices and expense categories; manually upload to a Google Picker-selected Pack Drive folder when authorized. Receipt line items are **not** additional ledger transactions.
+- **Forecasting and reports:** Local estimate using imported cash balance plus forecast future inflows/outflows, reserve and designated funds; printable committee category summary and CSV export without personal Scout finance data.
+- **Installable Android PWA:** Standalone manifest, icon, scope, service worker, install action and phone-friendly Finance tabs. Cached shell works offline after first load.
+- **Pack calendar:** One-button selector for the verified `Pack 179 Calendar (26–27)` and read-only event refresh after authorization.
 
-## Not yet included
+## Source-of-truth policy
 
-- No central user accounts, roles, shared database, background email service, or two-way multi-device synchronization.
-- No official Scoutbook Plus API or write-back.
-- No live financial balance reconciliation or automatic AI reports.
-- No server-based safeguards for youth contact records: local roster data exists in the browser that imports it. Only use trusted, non-shared devices for this feature.
+1. **Official treasurer ledger**: https://docs.google.com/spreadsheets/d/1tETtLSogYC3RFvHj_uDbAxgyGu9QcqXO/edit
+2. **Individual Scout credits**: https://docs.google.com/spreadsheets/d/1ttivHLcq0bopzuKJrlUM1farkG287dM1Krts3Q-NZYQ/edit
+3. **Budget Planner template**: Planning structure, *not* an authoritative balance.
+4. **PackOps**: Locally saved planning, categorization, receipt intake, reimbursement queue, and reports based on imported snapshots. Never writes to the official ledger or Scout-credit sheet.
+5. **Scoutbook Plus**: Official member/advancement/RSVP system. Google Calendar is the selected schedule feed; PackOps organizes event preparation separately.
 
-## Run locally
+## Very important: not production-secure for shared youth data
 
-Recommended: use the included Node server or VS Code Live Server. Direct `file://` opening does not support IndexedDB/Service Workers correctly in all browsers.
+This version **does not have centrally enforced app authentication, backend roles, or cross-device synchronization**. It uses browser IndexedDB for working data. Authentication with Google establishes only which files Google allows that signed-in person to read or write. It is **not** a substitute for app-wide role enforcement or protection of locally cached Scout data.
+
+**Do not** import real Scout rosters or Scout credits on a shared device. Never commit CSV exports, scanned receipts, local browser backups, Firebase service-account keys, or access tokens to GitHub. For use by multiple leaders, first deploy an authenticated backend and enforce role permissions server-side. See `docs/PRODUCTION_SECURITY.md`.
+
+### What isn't fully connected yet
+
+- No automatic read of the `.xlsx` treasurer ledger. Open it in Drive and export the current sheet to CSV to import. The source workbook remains untouched.
+- No automatic two-way sync of budgets, reimbursements, adjustments, or notes between phones/computers.
+- No centrally verified committee approval or treasurer role enforcement. "Reviewed" and "paid" are local tracking indicators that need verification.
+- No real OCR engine yet; receipt itemization is entered manually. A secured, consented OCR service can be added later, with human reconciliation required.
+- No automatic Scoutbook RSVP API integration. An event may be linked by its event title and PackOps workspace, regardless of attendance.
+- No notification backend or payment processor; nothing sends money, sends email, or modifies authoritative files without deliberate action.
+
+## Run and test
+
+Node 22+ is recommended. No runtime npm dependencies.
 
 ```bash
-npm install
+npm ci
 npm test
 npm run build
 npm run serve
 ```
 
-Open `http://localhost:4173` in your browser. Files are copied into `dist/` for deployment by `npm run build`.
+The server starts on `http://localhost:4173` (or `PORT=4193 npm run serve`). The GitHub Pages workflow deploys the static `dist/` directory after tests pass.
 
-## Deploy using GitHub Pages
+## Deploy to the existing GitHub project
 
-1. Create a new GitHub repository, e.g. `packops`, with a standard `main` branch.
-2. Upload all files/folders from this zip (including `.github/workflows/deploy.yml`, `tools/`, `tests/`, `package.json`, and `package-lock.json`). **Do not upload only `index.html`.**
-3. In the repo Settings → Pages, choose **GitHub Actions** as the deploy source.
-4. Push to `main`. The included workflow runs tests, copies the website to `dist/`, and deploys to Pages. The app URL should look like `https://YOURNAME.github.io/packops/`.
-5. Open the site on your Android phone in Chrome; use the browser's **Install app** or **Add to Home Screen** action.
+Repository: https://github.com/magorski87-png/PackOps179
 
-**Privacy:** GitHub Pages sites are publicly accessible even when individual Google Drive files are protected by their own permissions. Do not place family roster files, secrets, or unprotected financial records in the repository. Everything entered in PackOps itself is only in your browser's local storage in v0.1.
+**Backup first**: If you have locally saved plans/receipts on any device, keep that browser profile intact; do not clear site storage or uninstall the existing PWA until the upgrade is verified. IndexedDB schema migrations preserve current local stores, but private browsing, clearing site data, or switching origins can delete local data.
 
-## Optional: Configure direct Google Drive receipt uploads
+1. Extract the ZIP on your computer, retaining hidden `.github` and the `tests/`, `tools/` directories.
+2. Copy/commit the ZIP contents into the **root** of the existing `PackOps179` repository, replacing older source files. Do **not** commit `dist/` (GitHub Actions builds it).
+3. In GitHub → Actions verify that **Deploy PackOps** ran successfully after the commit.
+4. Open https://magorski87-png.github.io/PackOps179/ and hard-refresh if you see stale content. Look for the `Pack Finance` button and six Finance tabs.
+5. On Android Chrome, open the site → menu `⋮` → **Install app** (not just a webpage bookmark). Launch via the PackOps icon. Some browser/Android combinations display different installation wording.
 
-To do this, use a Google Cloud project controlled by an authorized Pack administrator:
+## Connect Google services (you set this up once per device)
 
-1. Enable the **Google Drive API** and **Google Picker API**.
-2. Configure the OAuth consent screen. Request the `https://www.googleapis.com/auth/drive.file` scope, not the broader full-Drive scope. Additional publishing/verification restrictions may apply depending on Google requirements and the users authorized.
-3. Create an OAuth **Web application** client. Set authorized JavaScript origins to the exact Pages origin, e.g. `https://YOURNAME.github.io` (no path), and your `http://localhost:4173` testing origin.
-4. Create a Google Picker browser API key and restrict it to your site's origin and appropriate API(s).
-5. In PackOps Settings, enter the **OAuth client ID** and **Picker API key**; sign in to the authorized Google account, then explicitly select the Pack's **2026–27 receipts folder**.
-6. Take a photo in PackOps → Upload Receipt, save it locally, and then press **Upload to Drive**. Confirm the file is visible in the chosen Drive folder.
+1. Create an OAuth **Web application client** in your Google Cloud project and authorize the JavaScript origin `https://magorski87-png.github.io` (origin only, no path). Configure the OAuth consent screen and test users appropriate to your organization.
+2. Enable the **Google Calendar API**, **Google Sheets API**, and, for manual receipt uploads, **Google Drive API and Google Picker API**.
+3. Open PackOps → Settings, enter the public OAuth **Client ID** (not client secret) and Picker API key. Restrict the API key to your site and enabled Picker API per Google Cloud guidance.
+4. In **Pack Calendar**, click **Use Pack 179 Calendar (26–27)**. Authorize `calendar.readonly` when prompted.
+5. In **Pack Finance → Scout Accounts**, click **Refresh Scout accounts from Google Drive** on a private device. Approve `spreadsheets.readonly`. It only reads the existing authorized sheet; Google still enforces file sharing.
+6. In **Receipt Upload**, click sign-in and explicitly select your Pack's correct receipt destination folder using Google Picker. `drive.file` access is requested for user-selected files; no upload happens until you click Upload.
 
-A selected destination remains stored on your device; the OAuth access token stays in memory and will be requested again when needed. **Do not enter service account passwords, private keys, or OAuth client secrets into the website.**
+A Google Cloud consent screen may require configuration/verification for third-party users. The free Google APIs may have quotas; any enhanced OCR backend could incur usage costs.
 
-For broad multi-leader access, shared sync, role-based privacy, delegated email delivery, and automated reminders, v2 should use a small authenticated backend and a purpose-built data model rather than treating Sheets alone as a multi-user application database.
+## Finance review workflow
 
-## Notes on calendar links
+1. **Plan:** Add expense/income allocations in Budget Builder; do not copy old sample actuals as authoritative.
+2. **Ledger:** Download the active `.xlsx` treasurer worksheet as CSV and import a read-only snapshot under Ledger Review.
+3. **Classify:** Label transactions as expense/income/transfer/restricted; assign category and linked PackOps event. No source workbook writes.
+4. **Accounts:** Refresh Scout credits using authorized Google Sheets read-only access; review discrepancies rather than auto-correcting.
+5. **Receipts:** Capture receipt, enter line items, and upload to the chosen Pack Drive folder when authorized.
+6. **Reimburse:** Create request; attach queued receipt; treasurer reconciles in the official ledger, then locally matches the expense.
+7. **Report:** Build a forecast based on explicit assumptions; print or export the committee category-only summary.
 
-The Pack calendar button points to the verified document `2026-2027 Pack 179 Calendar - Current.pdf`. Updating the *same Drive file* leaves the link valid. Replacing it with a new file ID requires updating the app link (`LINKS.calendar` in `data.js`) in this version.
+## Versioned code
 
-## Source architecture
-
-- `index.html`, `styles.css`, `app.js`: responsive UI and interaction handlers.
-- `data.js`: Pack links, meeting template, helper functions.
-- `db.js`: IndexedDB persistence.
-- `roster-import.js`: CSV parser and review flags.
-- `drive.js`: Google Picker/OAuth and explicit receipt upload.
-- `sw.js`: offline PWA shell cache.
-- `tests/`: unit tests.
-- `tools/build.mjs`: static build with no bundler or dependency installation.
-
-PackOps v0.1 is intentionally designed for immediate personal utility before adding shared record synchronization.
+- `finance.js`: Ledger/credit parsing, aggregation, export and reimbursement rules.
+- `finance-ui.js`: Finance screens built from the shared PackOps state.
+- `finance-google.js`: User-consented read-only Google Sheet access, tokens in memory only.
+- `db.js`: IndexedDB schema version 3; existing local data migration.
+- `app.js`: Integration with buttons, forms, receipt itemization, PWA install and calendar shortcut.
+- `styles.css`: Mobile/desktop Finance layout.
+- `tests/`: 23+ automated tests using fictional data.
+- `.github/workflows/deploy.yml`: test/build/deploy on push to main.

@@ -1,6 +1,7 @@
 {
   "name": "PackOps \u2014 Pack 179 Leadership",
   "short_name": "PackOps",
+  "id": "./",
   "description": "Pack 179's handy leadership dashboard",
   "display": "standalone",
   "start_url": "./",

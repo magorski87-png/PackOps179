@@ -3,6 +3,7 @@ export const LINKS={
   calendar:'https://drive.google.com/file/d/1uPTj-jJEHR64LKteZbUFz3gyinsis-Vj/view',
   calendarFolder:'https://drive.google.com/drive/folders/1zAXz3nJUUZFuJsdaSeWfZFM0RTtNHEP0',
   ledger:'https://docs.google.com/spreadsheets/d/1tETtLSogYC3RFvHj_uDbAxgyGu9QcqXO/edit',
+  scoutCredits:'https://docs.google.com/spreadsheets/d/1ttivHLcq0bopzuKJrlUM1farkG287dM1Krts3Q-NZYQ/edit',
   receiptRoot:'https://drive.google.com/drive/folders/1fiuNxciwTNglne95DN7tVkil5SjHIXuF',
   receipts2026:'https://drive.google.com/drive/folders/1aBYw8oA0I3fv7dhOO_yVDikjFBx7Uhml',
   operations:'https://docs.google.com/spreadsheets/d/1Ca5fkhF_QxkUW8OOHkBuwEMvDQtet7Nt2wR0Uqyju9c/edit',
@@ -14,7 +15,7 @@ export const LINKS={
 export const DEN_NAMES=['Lion','Tiger','Wolf','Bear','Webelos','Arrow of Light'];
 export const MENU=[
   {id:'calendar',label:'Pack Calendar',sub:'Always one tap away',emoji:'🗓️',tone:'sage'},
-  {id:'budget',label:'Pack Budget',sub:'Plan & review spending',emoji:'📊',tone:'gold'},
+  {id:'budget',label:'Pack Finance',sub:'Budget, accounts & reports',emoji:'📊',tone:'gold'},
   {id:'receipts',label:'Upload Receipt',sub:'Camera → Pack Drive',emoji:'🧾',tone:'peach'},
   {id:'meeting',label:'Pack Meeting',sub:'Your live cue sheet',emoji:'🚩',tone:'sky'},
   {id:'volunteers',label:'Volunteers',sub:'Jobs & responsibilities',emoji:'🤝',tone:'lilac'},
@@ -61,5 +62,5 @@ export function brief(tasks,events,today=isoToday()){
  const s=summary(tasks,today);
  const fmt=t=>`• ${t.title} — ${t.owner||'UNASSIGNED'}${t.due?' (due '+t.due+')':''}`;
  const next=events.filter(e=>e.date&&e.date>=today).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,5);
- return ['PACK 179 — CUBMASTER WORKING BRIEF','Generated '+today+' • PackOps local records (not Scoutbook)',`Open ${s.open.length}  |  Overdue ${s.overdue.length}  |  Unassigned ${s.unassigned.length}`,'','OVERDUE',...(s.overdue.length?s.overdue.map(fmt):['• None recorded']),'','COMING DUE',...(s.dueSoon.length?s.dueSoon.map(fmt):['• None recorded']),'','NEEDS AN OWNER',...(s.unassigned.length?s.unassigned.map(fmt):['• None recorded']),'','UPCOMING PLANNED EVENTS',...(next.length?next.map(e=>`• ${niceDate(e.date)} — ${e.title}`):['• None recorded']),'','Confirm statuses with leaders; Scoutbook Plus remains the official Pack calendar and advancement source.'].join('\n');
+ return ['PACK 179 — CUBMASTER WORKING BRIEF','Generated '+today+' • PackOps tasks and currently loaded calendar data',`Open ${s.open.length}  |  Overdue ${s.overdue.length}  |  Unassigned ${s.unassigned.length}`,'','OVERDUE',...(s.overdue.length?s.overdue.map(fmt):['• None recorded']),'','COMING DUE',...(s.dueSoon.length?s.dueSoon.map(fmt):['• None recorded']),'','NEEDS AN OWNER',...(s.unassigned.length?s.unassigned.map(fmt):['• None recorded']),'','UPCOMING EVENTS (loaded data)',...(next.length?next.map(e=>`• ${niceDate(e.date)} — ${e.title}${e.source?' ['+e.source+']':''}`):['• None recorded']),'','Confirm statuses with leaders; Scoutbook Plus remains the official Pack calendar and advancement source.'].join('\n');
 }
