@@ -1,4 +1,4 @@
-import {TABLES,list,get,put,remove,readSetting,writeSetting,clearEverything} from './db.js';
+import {TABLES,list,get,put,remove,readSetting,writeSetting,clearEverything,replaceAnnualBudget} from './db.js';
 import {LINKS,MENU,MEETING,DEN_NAMES,isoToday,makeId,money,esc,safeUrl,niceDate,summary,completion,csvParse,brief} from './data.js';
 import {authorize,connected,disconnect,selectFolder,uploadReceipt,uploadEncryptedBackup} from './drive.js';
 import {parseRoster,importPrivacySummary,denGroup,exportRoster,groupScouts,RANKS} from './roster-import.js';
@@ -9,6 +9,7 @@ import {financeView} from './finance-ui.js';
 import {parseLedgerCsv,parseScoutCreditsCsv,financialSnapshot,reimbursePaidAllowed,csvExport,reportsRows,amount,EXPENSE_CATEGORIES} from './finance.js';
 import {fetchScoutCreditSnapshot} from './finance-google.js';
 import {TEMPLATE_ROWS,TEMPLATE_META} from './finance-template.js';
+import {wizardSeedExpenses,validateWizardSettings,wizardPreview,wizardBudgetLines} from './budget-wizard.js';
 import {currentScoutYear,duesForYear,scoutAccountYear,creditDifference,validScoutYear} from './pack-config.js';
 import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from './settings-actions.js';
 
@@ -16,7 +17,7 @@ const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
 let pwaInstallPrompt=null;
 const dbState=Object.fromEntries(TABLES.map(t=>[t,t==='settings'?[]:[]]));
-const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name'};
+const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name'};
 const now=()=>Date.now();
 const formData=(form,key)=>String(new FormData(form).get(key)||'').trim();
 const option=(value,label,current)=>`<option value="${esc(value)}"${String(value)===String(current)?' selected':''}>${esc(label)}</option>`;
@@ -265,7 +266,34 @@ async function handleAction(action,trigger){
    const receipt=dbState.receipts.find(r=>r.id===id),i=Number(trigger.dataset.index);
    if(receipt?.items?.[i]&&askDelete('Remove this locally itemized receipt line?')){await put('receipts',{...receipt,items:receipt.items.filter((_,j)=>i!==j)});await refresh()}return;
   }
-  case 'finance-tab':ui.financeTab=id;ui.financeForm='';render();return;
+  case 'finance-tab':ui.financeTab=id;ui.financeForm='';ui.wizardStep=-1;render();return;
+  case 'finance-wizard-start':ui.financeTab='builder';ui.wizardStep=0;ui.wizardSource='template';ui.wizardConfig=null;ui.wizardExpenses=[];render();return;
+  case 'finance-wizard-close':ui.wizardStep=-1;render();return;
+  case 'finance-wizard-back':ui.wizardStep=Math.max(0,(ui.wizardStep??0)-1);render();return;
+  case 'finance-wizard-save':{
+   if(ui.wizardStep!==3)throw Error('Complete the budget wizard before saving');
+   const config=ui.wizardConfig,expenses=ui.wizardExpenses||[];
+   const preview=wizardPreview(config,expenses);
+   if(config.year!==activeYear())throw Error('Select the same Scout year in Settings before saving');
+   const previous=dbState.budget.filter(b=>(b.year||'2026-27')===activeYear());
+   if(!askDelete('Save '+activeYear()+' DRAFT budget with '+expenses.length+' expense lines, '+money(preview.totalExpense)+' expenses and '+money(preview.income)+' projected income? '+previous.length+' existing current-year lines will be archived locally and replaced. No treasurer ledger records are changed.'))return;
+   const stamp=now();
+   const draft=wizardBudgetLines(config,expenses).map(line=>({...line,id:makeId(),createdAt:stamp}));
+   const audit={id:makeId(),type:'budget-revision',year:activeYear(),createdAt:stamp,source:'Budget Wizard',previous:previous.map(x=>({...x})),next:draft.map(x=>({...x})),summary:{expenses:preview.totalExpense,income:preview.income,dues:preview.dues}};
+   const year=activeYear(),settingsUpdates=[
+    {key:'financeDues:'+year,value:String(preview.dues)},
+    {key:'financeFundraisingTarget:'+year,value:String(preview.fundraising)},
+    {key:'financeFundraisingCommission:'+year,value:String(preview.commission)},
+    {key:'financeFundraisingScouts:'+year,value:String(preview.scouts)},
+    {key:'financeBudgetDraftUpdated:'+year,value:new Date(stamp).toISOString()}
+   ];
+   await replaceAnnualBudget({existing:previous,draft,audit,settings:settingsUpdates});
+   for(const account of dbState.financeAccounts.filter(x=>scoutAccountYear(x)===year)){
+    const diff=creditDifference(account,preview.dues);
+    await put('financeAccounts',{...account,calculated:Math.round((Number(account.carryover||0)+Number(account.earnings||0)-preview.dues)*100)/100,needsReview:diff!==null&&Math.abs(diff)>0.011});
+   }
+   ui.wizardStep=-1;await refresh();notify('Annual draft budget saved with revision history; ledger remains unchanged');return;
+  }
   case 'finance-seed-template':{
    if(activeYear()!==TEMPLATE_META.year)throw Error('The supplied 2026–27 draft template can only be added to the 2026–27 Scout year.');
    if(dbState.budget.length){notify('Your planning budget is not empty. The template was not loaded, to protect your current work.',true);return;}
@@ -431,6 +459,29 @@ async function handleForm(form){
   case 'pack-year-config':if(await saveYearConfiguration(form,dbState.financeAccounts)){await refresh();notify('Annual Pack dues saved for '+activeYear())}return;
   case 'backup-export':{const message=await exportPackOpsBackup(form,settings);if(message)notify(message);return;}
   case 'backup-restore':if(await restorePackOpsFromFile(form)){ui.rosterSelected.clear();ui.googleEvents=[];ui.calendarFetchedAt=0;await refresh();notify('PackOps restored. Reconnect Google services.')}return;
+  case 'wizard-source':{
+   const source=f('source');
+   if(!['template','prior','blank'].includes(source))throw Error('Choose a valid budget source');
+   ui.wizardSource=source;ui.wizardStep=1;render();return;
+  }
+  case 'wizard-assumptions':{
+   const config={year:activeYear(),scouts:Number(f('scouts')),adults:Number(f('adults')),dues:f('dues'),fundraising:f('fundraising'),commission:f('commission')};
+   validateWizardSettings(config);
+   const prevYear=(Number(activeYear().slice(0,4))-1)+'-'+activeYear().slice(2,4);
+   ui.wizardExpenses=wizardSeedExpenses({source:ui.wizardSource,scouts:config.scouts,adults:config.adults,
+    priorBudget:dbState.budget.filter(b=>(b.year||'2026-27')===prevYear)});
+   ui.wizardConfig={...config,source:ui.wizardSource};ui.wizardStep=2;render();return;
+  }
+  case 'wizard-expenses':{
+   if(!ui.wizardConfig||!ui.wizardExpenses?.length)throw Error('Complete the earlier wizard steps first');
+   const expenseRows=ui.wizardExpenses.map((line,i)=>{
+    const raw=f('expense_'+i),planned=Number(raw);
+    if(raw===''||!Number.isFinite(planned)||planned<0||planned>1e9)throw Error('Enter a valid amount for '+line.detail);
+    return {...line,planned:Math.round(planned*100)/100};
+   });
+   wizardPreview(ui.wizardConfig,expenseRows);
+   ui.wizardExpenses=expenseRows;ui.wizardStep=3;render();return;
+  }
   case 'finance-budget':{
    const v=Number(f('planned'));if(!Number.isFinite(v)||v<0||v>1e9)throw Error('Enter a valid planning amount');
    await put('budget',{id:makeId(),category:f('category'),type:f('type'),planned:Math.round(v*100)/100,eventId:f('eventId'),year:f('year'),note:f('note'),createdAt:now()});ui.financeForm='';break;
@@ -452,7 +503,8 @@ async function handleForm(form){
   }
   case 'finance-reimbursement':{
    const v=Number(f('amount'));if(!Number.isFinite(v)||v<=0||v>1e7)throw Error('Enter a valid reimbursement amount');
-   await put('financeReimbursements',{id:makeId(),requester:f('requester'),amount:Math.round(v*100)/100,date:f('date'),eventTitle:f('eventTitle'),category:f('category'),notes:f('notes'),receiptId:f('receiptId'),sourceYear:activeYear(),status:'submitted',createdAt:now()});break;
+   const eventId=f('eventId'),event=dbState.events.find(e=>e.id===eventId);
+    await put('financeReimbursements',{id:makeId(),requester:f('requester'),amount:Math.round(v*100)/100,date:f('date'),eventId:event?.id||'',eventTitle:event?.title||'',category:f('category'),notes:f('notes'),receiptId:f('receiptId'),sourceYear:activeYear(),status:'submitted',createdAt:now()});ui.reimbursementEventId='';break;
   }
   case 'finance-fundraising':{
    const goal=Number(f('target')),rate=Number(f('rate')),members=Number(f('members'));
