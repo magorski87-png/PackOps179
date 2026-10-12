@@ -389,6 +389,28 @@ function askDelete(message){return window.confirm(message)}
 async function handleAction(action,trigger){
  const id=trigger.dataset.id;
  switch(action){
+  case 'cloud-sign-in':await googleCloudLogin();return;
+  case 'cloud-sign-out':await googleCloudLogout();ui.cloudMembers=[];ui.cloudInvites=[];await refresh();route('settings');return;
+  case 'cloud-refresh':await syncCloudIdentity();await loadCloudAdmin();await loadFamilyForms();await refresh();notify('Shared data refreshed from Supabase');return;
+  case 'cloud-migrate':{
+   if(!cloudActive())throw Error('Sign in as Pack administrator first');
+   const tables=Object.fromEntries(await Promise.all(TABLES.filter(sharedTable).map(async name=>[name,await localList(name)])));
+   const count=Object.values(tables).reduce((n,rows)=>n+rows.length,0);
+   if(!count){notify('There are no earlier device records to migrate.');return;}
+   if(!askDelete('Copy '+count+' existing local entries into the Pack shared database? This includes sensitive youth roster and finance records. Use only a trusted computer; confirm you are authorized by Pack 179. Existing cloud IDs will not be overwritten.'))return;
+   const totals=await migrateLocalRecords(tables);
+   await refresh();notify('Shared import reviewed: '+Object.values(totals).reduce((a,b)=>a+b,0)+' attempted local entries. Originals remain on this device.');return;
+  }
+  case 'cloud-update-role':{
+   const role=root.querySelector('#member-role-'+CSS.escape(id))?.value;
+   const dens=(root.querySelector('#member-den-'+CSS.escape(id))?.value||'').split(',').map(x=>x.trim()).filter(Boolean);
+   const status=root.querySelector('#member-status-'+CSS.escape(id))?.value;
+   if(!askDelete('Update this leader’s Pack access to '+role+' ('+status+')?'))return;
+   await updateLeaderRole(id,role,dens,status);await loadCloudAdmin();render();notify('Leader permissions updated');return;
+  }
+  case 'family-open-form':await openFamilyForm(id);return;
+  case 'family-copy-link':await navigator.clipboard.writeText(ui.familyLink);notify('Private invitation link copied. Share only with the intended household.');return;
+  case 'family-export':if(!ui.familyResults)throw Error('Open a form first');downloadCsv(familyResponseCsv(ui.familyResults),'Pack179_FamilyResponses_'+isoToday()+'.csv');notify('Response CSV exported');return;
   case 'receipt-itemize':ui.receiptItemsId=id;render();return;
   case 'receipt-itemize-close':ui.receiptItemsId='';render();return;
   case 'receipt-item-delete':{
@@ -552,7 +574,7 @@ async function handleAction(action,trigger){
   case 'equipment-edit':ui.editEquipment=id;ui.form='equipment';render();return;
   case 'equipment-cancel':ui.editEquipment='';ui.form='';render();return;
   case 'equipment-clear-search':ui.equipmentQuery='';render();return;
-  case 'equipment-export':{const rows=action.dataset.scope==='all'?queryEquipment(dbState.equipment,{sort:ui.equipmentSort}):queryEquipment(dbState.equipment,{search:ui.equipmentQuery,category:ui.equipmentCategory,sort:ui.equipmentSort});downloadCsv(equipmentCsv(rows),`Pack179_Equipment_${isoToday()}.csv`);notify(`Exported ${rows.length} equipment entries`);return;}
+  case 'equipment-export':{const rows=trigger.dataset.scope==='all'?queryEquipment(dbState.equipment,{sort:ui.equipmentSort}):queryEquipment(dbState.equipment,{search:ui.equipmentQuery,category:ui.equipmentCategory,sort:ui.equipmentSort});downloadCsv(equipmentCsv(rows),`Pack179_Equipment_${isoToday()}.csv`);notify(`Exported ${rows.length} equipment entries`);return;}
   case 'show-bookmark':ui.form='bookmark';render();return;
   case 'cancel-form':ui.form='';ui.editTask='';render();return;
   case 'calendar-plan':{
@@ -796,6 +818,7 @@ root.addEventListener('submit',async event=>{
 });
 root.addEventListener('change',async event=>{
  const target=event.target;
+ if(target.dataset.change==='den-choice'){ui.denChoice=target.value;render();return}
  if(target.dataset.change==='finance-account-den'){ui.accountDen=target.value;render();return}
  if(target.dataset.change==='finance-account-sort'){ui.accountSort=target.value;render();return}
  if(['finance-tag-kind','finance-tag-category','finance-tag-event'].includes(target.dataset.change)){
@@ -826,6 +849,9 @@ root.addEventListener('change',async event=>{
  }
 });
 root.addEventListener('input',event=>{
+ if(event.target.name==='family-search'){
+  const val=event.target.value,pos=event.target.selectionStart;ui.familySearch=val;render();const el=root.querySelector('[name="family-search"]');if(el){el.focus();if(pos!==null)el.setSelectionRange(pos,pos)}return;
+ }
  if(event.target.name==='equipment-search'){
   const val=event.target.value,pos=event.target.selectionStart;ui.equipmentQuery=val;render();const el=root.querySelector('[name="equipment-search"]');if(el){el.focus();if(pos!==null)el.setSelectionRange(pos,pos)}return;
  }
