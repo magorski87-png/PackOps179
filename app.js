@@ -311,7 +311,7 @@ async function handleAction(action,trigger){
   }
   case 'finance-seed-template':{
    if(activeYear()!==TEMPLATE_META.year)throw Error('The supplied 2026–27 draft template can only be added to the 2026–27 Scout year.');
-   if(dbState.budget.length){notify('Your planning budget is not empty. The template was not loaded, to protect your current work.',true);return;}
+   if(dbState.budget.some(b=>(b.year||'2026-27')===activeYear())){notify('Your planning budget is not empty. The template was not loaded, to protect your current work.',true);return;}
    if(!askDelete('Create 24 DRAFT budget lines from your uploaded 2026–27 template? This will NOT alter the treasurer ledger or officially approve a budget.'))return;
    for(const line of TEMPLATE_ROWS)await put('budget',{...line,id:makeId(),createdAt:now()});
    if(settings('financeDues:'+activeYear())==='')await writeSetting('financeDues:'+activeYear(),String(TEMPLATE_META.annualDues));
@@ -327,8 +327,10 @@ async function handleAction(action,trigger){
   case 'finance-delete-budget':if(askDelete('Remove this LOCAL planning budget line?')){await remove('budget',id);await refresh()}return;
   case 'finance-baseline':{
    if(!askDelete('Record the current LOCAL budget as your reviewed baseline? This does not constitute committee approval or update Google Drive.'))return;
-   const v=financialSnapshot({budget:dbState.budget,ledger:dbState.financeLedger,tags:dbState.financeTags,reimbursements:dbState.financeReimbursements});
-   await writeSetting('financeBaselineExpenses',String(v.plannedExpenses));await writeSetting('financeBaselineDate',isoToday());await refresh();notify('Reviewed planning baseline recorded locally');return;
+   const year=activeYear(),ledger=dbState.financeLedger.filter(t=>scoutAccountYear(t)===year);
+   const v=financialSnapshot({budget:dbState.budget.filter(t=>(t.year||'2026-27')===year),ledger,
+    tags:dbState.financeTags.filter(t=>ledger.some(l=>l.id===t.id)),reimbursements:dbState.financeReimbursements.filter(t=>scoutAccountYear(t)===year)});
+   await writeSetting('financeBaselineExpenses:'+year,String(v.plannedExpenses));await writeSetting('financeBaselineDate:'+year,isoToday());await refresh();notify('Reviewed planning baseline recorded locally');return;
   }
   case 'finance-fetch-accounts':{
    if(!window.confirm('Scout credit information is sensitive. Continue ONLY on your private, trusted device? This version stores the imported snapshot locally without centrally enforced roles.'))return;
@@ -354,7 +356,7 @@ async function handleAction(action,trigger){
   case 'finance-clear-accounts':if(askDelete('Remove the local Scout credit snapshot from this device? Official Drive records are unchanged.')){for(const item of dbState.financeAccounts)await remove('financeAccounts',item.id);await writeSetting('financeAccountsImportedAt','');await refresh();notify('Local Scout credit copy deleted')}return;
   case 'finance-export-accounts':{
    const q=ui.accountQuery.trim().toLowerCase(),den=ui.accountDen;
-   const rows=dbState.financeAccounts.filter(r=>(den==='all'||r.den===den)&&[r.name,r.den].some(x=>String(x||'').toLowerCase().includes(q))).map(r=>({Scout:r.name,Den:r.den,Carryover:r.carryover,Popcorn:r.earnings,Balance:r.balance??'Needs review'}));
+   const rows=dbState.financeAccounts.filter(r=>scoutAccountYear(r)===activeYear()&&(den==='all'||r.den===den)&&[r.name,r.den].some(x=>String(x||'').toLowerCase().includes(q))).map(r=>({Scout:r.name,Den:r.den,Carryover:r.carryover,Popcorn:r.earnings,Balance:r.balance??'Needs review'}));
    if(!rows.length)throw Error('No Scout credit records to export.');
    if(!askDelete('This CSV contains individual Scout financial balances. Download only to an access-controlled device and storage location?'))return;
    downloadCsv(csvExport(rows,['Scout','Den','Carryover','Popcorn','Balance']),`Pack179_Scout_Account_Review_${isoToday()}.csv`);notify('Restricted Scout credit CSV downloaded');return;
@@ -539,11 +541,11 @@ async function handleForm(form){
   case 'finance-fundraising':{
    const goal=Number(f('target')),rate=Number(f('rate')),members=Number(f('members'));
    if(!Number.isFinite(goal)||goal<0||goal>1e8||!Number.isFinite(rate)||rate<=0||rate>100||!Number.isInteger(members)||members<1||members>2000)throw Error('Enter a valid proceeds target, commission percentage and number of Scouts');
-   await writeSetting('financeFundraisingTarget',String(goal));await writeSetting('financeFundraisingCommission',String(rate/100));await writeSetting('financeFundraisingScouts',String(members));break;
+   await writeSetting('financeFundraisingTarget:'+activeYear(),String(goal));await writeSetting('financeFundraisingCommission:'+activeYear(),String(rate/100));await writeSetting('financeFundraisingScouts:'+activeYear(),String(members));break;
   }
   case 'finance-forecast':{
    for(const name of ['futureIncome','futureExpenses','reserve','restricted']){const v=Number(f(name));if(!Number.isFinite(v)||v<0||v>1e9)throw Error('Use non-negative amounts for forecast assumptions.');}
-   await writeSetting('financeFutureIncome',f('futureIncome'));await writeSetting('financeFutureExpenses',f('futureExpenses'));await writeSetting('financeReserve',f('reserve'));await writeSetting('financeRestricted',f('restricted'));break;
+   for(const key of ['futureIncome','futureExpenses','reserve','restricted'])await writeSetting(({futureIncome:'financeFutureIncome',futureExpenses:'financeFutureExpenses',reserve:'financeReserve',restricted:'financeRestricted'})[key]+':'+activeYear(),f(key));break;
   }
   case 'finance-import-ledger':{
    const file=form.elements.file.files?.[0];if(!file||file.size>3*1024*1024)throw Error('Select a ledger CSV smaller than 3 MB');
