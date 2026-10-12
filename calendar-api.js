@@ -47,21 +47,22 @@ export async function calendarList(clientId){
  }
  return list;
 }
-export function simplifyGoogleEvent(e){
+export function simplifyGoogleEvent(e,calendarId=''){
  const date=e.start?.date||e.start?.dateTime?.slice(0,10)||'';
  if(!date)return null;
- return {id:'google:'+e.id, title:e.summary||'(Untitled)',date,location:e.location||'',time:e.start?.dateTime||'',url:e.htmlLink||'',source:'Google Calendar'};
+ return {id:'google:'+calendarId+':'+e.id,calendarId,googleId:e.id,title:e.summary||'(Untitled)',date,
+   location:e.location||'',time:e.start?.dateTime||'',endTime:e.end?.dateTime||'',description:e.description||'',url:e.htmlLink||'',source:'Google Calendar'};
 }
 export async function calendarUpcoming(clientId,calendarId){
  if(!calendarId)throw Error('Choose a calendar.');
  const start=new Date();start.setDate(start.getDate()-1);
- const stop=new Date();stop.setDate(stop.getDate()+180);
+ const stop=new Date();stop.setDate(stop.getDate()+430);
  const rows=[];let page='';
  for(let i=0;i<8;i++){
-  const params=new URLSearchParams({timeMin:start.toISOString(),timeMax:stop.toISOString(),singleEvents:'true',orderBy:'startTime',maxResults:'250',fields:'items(id,summary,location,start,htmlLink,status),nextPageToken'});
+  const params=new URLSearchParams({timeMin:start.toISOString(),timeMax:stop.toISOString(),singleEvents:'true',orderBy:'startTime',maxResults:'250',fields:'items(id,summary,location,start,end,description,htmlLink,status),nextPageToken'});
   if(page)params.set('pageToken',page);
   const data=await request('calendars/'+encodeURIComponent(calendarId)+'/events?'+params,clientId);
-  for(const event of data.items||[])if(event.status!=='cancelled'){const row=simplifyGoogleEvent(event);if(row)rows.push(row)}
+  for(const event of data.items||[])if(event.status!=='cancelled'){const row=simplifyGoogleEvent(event,calendarId);if(row)rows.push(row)}
   page=data.nextPageToken||'';if(!page)break;
  }
  return rows;
