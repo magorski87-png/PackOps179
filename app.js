@@ -249,10 +249,11 @@ async function handleAction(action,trigger){
   }
   case 'finance-tab':ui.financeTab=id;ui.financeForm='';render();return;
   case 'finance-seed-template':{
+   if(activeYear()!==TEMPLATE_META.year)throw Error('The supplied 2026–27 draft template can only be added to the 2026–27 Scout year.');
    if(dbState.budget.length){notify('Your planning budget is not empty. The template was not loaded, to protect your current work.',true);return;}
    if(!askDelete('Create 24 DRAFT budget lines from your uploaded 2026–27 template? This will NOT alter the treasurer ledger or officially approve a budget.'))return;
    for(const line of TEMPLATE_ROWS)await put('budget',{...line,id:makeId(),createdAt:now()});
-   await writeSetting('financeDues',String(TEMPLATE_META.annualDues));
+   if(settings('financeDues:'+activeYear())==='')await writeSetting('financeDues:'+activeYear(),String(TEMPLATE_META.annualDues));
    await writeSetting('financeFundraisingTarget',String(TEMPLATE_META.fundraisingProceedsTarget));
    await writeSetting('financeFundraisingCommission',String(TEMPLATE_META.commissionRate));
    await writeSetting('financeFundraisingScouts',String(TEMPLATE_META.members));
@@ -272,10 +273,11 @@ async function handleAction(action,trigger){
    if(!window.confirm('Scout credit information is sensitive. Continue ONLY on your private, trusted device? This version stores the imported snapshot locally without centrally enforced roles.'))return;
    trigger.disabled=true;trigger.textContent='Reading authorized Sheet…';
    const result=await fetchScoutCreditSnapshot(settings('googleClientId'));
-   const parsed=parseScoutCreditsCsv(result.csv,amount(settings('financeDues')||105));
+   const dues=annualDues();if(dues===null)throw Error('Set annual dues for '+activeYear()+' in Settings first');
+   const parsed=parseScoutCreditsCsv(result.csv,dues);
    if(!window.confirm(`Refresh ${parsed.scouts.length} Scout credit records on this device? Previous local snapshot will be replaced. The original Google Sheet will not change.`))return;
    for(const row of dbState.financeAccounts)await remove('financeAccounts',row.id);
-   for(const row of parsed.scouts)await put('financeAccounts',row);
+   for(const row of parsed.scouts)await put('financeAccounts',{...row,sourceYear:activeYear()});
    await writeSetting('financeAccountsImportedAt',result.syncedAt);
    await refresh();notify(`Refreshed ${parsed.scouts.length} Scout account records from Google (read-only)`);return;
   }
@@ -386,6 +388,7 @@ async function handleAction(action,trigger){
   }
   case 'google-sign-in':try{await authorize(settings('googleClientId'));notify('Google authorized for this session');render()}catch(e){notify(String(e.message),true)}return;
   case 'google-pick-folder':try{const folder=await selectFolder(settings('googleApiKey'),settings('googleClientId'));await writeSetting('googleFolder',folder.id);await writeSetting('googleFolderName',folder.name);await refresh();notify('Destination folder selected');}catch(e){notify(String(e.message),true)}return;
+  case 'google-pick-backup-folder':try{const folder=await selectFolder(settings('googleApiKey'),settings('googleClientId'),'Choose restricted PackOps backup folder');await writeSetting('googleBackupFolder',folder.id);await writeSetting('googleBackupFolderName',folder.name);await refresh();notify('Encrypted backup folder selected')}catch(e){notify(String(e.message),true)}return;
   case 'google-disconnect':disconnect();render();notify('Google token cleared from this session');return;
   case 'clear-local':if(askDelete('Permanently clear all LOCAL PackOps records on this device, including roster and queued receipts? This will not delete Google Drive files.')){await clearEverything();dbState.events=[];dbState.roster=[];ui.rosterPreview=null;await refresh();notify('All local PackOps records cleared')}return;
  }
@@ -446,7 +449,7 @@ async function handleForm(form){
    const parsed=parseScoutCreditsCsv(await file.text(),dues);
    if(!askDelete(`Replace LOCAL Scout credit snapshot with ${parsed.scouts.length} records? ${parsed.continuationRows} guardian continuation rows are intentionally not stored in finance.`))return;
    for(const row of dbState.financeAccounts)await remove('financeAccounts',row.id);
-   for(const row of parsed.scouts)await put('financeAccounts',row);
+   for(const row of parsed.scouts)await put('financeAccounts',{...row,sourceYear:activeYear()});
    await writeSetting('financeDues',String(dues));await writeSetting('financeAccountsImportedAt',new Date().toISOString());
    await refresh();notify(`Imported ${parsed.scouts.length} Scout financial records locally`);return;
   }
