@@ -24,3 +24,18 @@ export function creditDifference(record,dues){
  if(dues===null||record.balance===null||record.balance===undefined)return null;
  return Math.round((Number(record.carryover||0)+Number(record.earnings||0)-dues-Number(record.balance))*100)/100;
 }
+
+export function googleSheetIdFromUrl(value){
+ let url;
+ try{url=new URL(String(value||''))}catch{throw Error('Enter a valid Google Sheets URL')};
+ if(url.protocol!=='https:'||url.hostname!=='docs.google.com')throw Error('Use a Google Sheets URL from docs.google.com');
+ const match=/^\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})(?:\/|$)/.exec(url.pathname);
+ if(!match)throw Error('That is not a valid Google Sheets document link');
+ return match[1];
+}
+export function officialFileUrl(value){
+ if(!value)return '';
+ let url;try{url=new URL(String(value))}catch{throw Error('Enter a Google Drive or Sheets URL')};
+ if(url.protocol!=='https:'||!['docs.google.com','drive.google.com'].includes(url.hostname))throw Error('Use an HTTPS Google Drive or Sheets URL');
+ return url.href;
+}
