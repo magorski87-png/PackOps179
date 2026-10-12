@@ -42,10 +42,10 @@ async function keyFor(passphrase,salt,usage){
  const material=await crypto.subtle.importKey('raw',encoder.encode(passphrase),'PBKDF2',false,['deriveKey']);
  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,[usage]);
 }
-export async function createEncryptedBackup(passphrase){
+export async function createEncryptedBackup(passphrase,sharedSnapshot=null){
  const tables={};
  for(const table of TABLES){
-  const records=await list(table);
+  const records=sharedSnapshot&&Object.hasOwn(sharedSnapshot,table)?sharedSnapshot[table]:await list(table);
   // Google public client configuration should be re-entered on each device.
   const filtered=table==='settings'?records.filter(r=>!/^google(ClientId|ApiKey|Folder|FolderName|BackupFolder|BackupFolderName)$/.test(r.key)):records;
   tables[table]=await serialize(filtered);
@@ -74,7 +74,8 @@ export async function readEncryptedBackup(file,passphrase){
  if(dataKeys.some(k=>!TABLES.includes(k)))throw Error('Backup includes unsupported tables; update PackOps before importing');
  const rows={};
  for(const table of TABLES){
-  const source=data.tables[table];
+  // Older v0.5 backups predate the den-record tables; treat ONLY those missing tables as empty.
+  const source=data.tables[table]??(['denPlans','adventureProgress','attendance'].includes(table)?[]:null);
   if(!Array.isArray(source))throw Error('Backup missing table: '+table);
   const key=table==='settings'?'key':'id',seen=new Set();
   if(source.length>50000)throw Error('Backup table is unexpectedly large: '+table);
