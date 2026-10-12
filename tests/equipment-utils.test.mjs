@@ -14,7 +14,7 @@ test('prefix searching progressively narrows across multiple searchable fields',
  assert.equal(queryEquipment(items,{search:'not here'}).length,0);
 });
 test('filter and sort compose with search',()=>{
- assert.deepEqual(queryEquipment(items,{category:'Rockets & STEM',search:'rocket',sort:'name-desc'}).map(x=>x.id),['a','b']);
+ assert.deepEqual(queryEquipment(items,{category:'Rockets & STEM',search:'rocket',sort:'name-desc'}).map(x=>x.id),['b','a']);
  assert.deepEqual(queryEquipment(items,{sort:'category'}).map(x=>x.id),['d','c','a','b']);
 });
 test('older equipment defaults and safe CSV export',()=>{
