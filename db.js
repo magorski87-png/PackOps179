@@ -72,6 +72,22 @@ export async function replaceAnnualBudget({existing=[],draft=[],audit,settings=[
   }catch(error){tx.abort();reject(error)}
  });
 }
+// Atomic replacement of one year's read-only ledger snapshot. Never edits official Google files.
+export async function replaceAnnualLedger({previous=[],next=[],year,importedAt}){
+ const db=await openDb();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction(['financeLedger','settings'],'readwrite');
+  tx.oncomplete=()=>resolve();
+  tx.onerror=()=>reject(tx.error||new Error('Ledger import failed; previous snapshot retained'));
+  tx.onabort=()=>reject(tx.error||new Error('Ledger import cancelled; previous snapshot retained'));
+  try{
+   const ledger=tx.objectStore('financeLedger');
+   for(const row of previous)ledger.delete(row.id);
+   for(const row of next)ledger.put(row);
+   tx.objectStore('settings').put({key:'financeLedgerImportedAt:'+year,value:importedAt});
+  }catch(error){tx.abort();reject(error)}
+ });
+}
 export async function clearEverything(){
   const db=await openDb();db.close();instancePromise=undefined;
   await new Promise((resolve,reject)=>{const req=indexedDB.deleteDatabase(DB_NAME);req.onsuccess=resolve;req.onerror=()=>reject(req.error);req.onblocked=()=>reject(new Error('Close other PackOps tabs before clearing data'))});
