@@ -29,7 +29,7 @@ export function familyManagerView({forms=[],responses=null,activeId='',lastLink=
 }
 export function denWorkspaceView({state,den='',allowed=[],esc,btn,field,select,textarea,intro,note}){
  const plans=state.denPlans.filter(x=>x.den===den).sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'));
- const roster=state.roster.filter(x=>x.den===den);
+ const roster=state.roster.filter(x=>(x.denGroup||x.den)===den);
  const progress=state.adventureProgress.filter(x=>x.den===den);
  const attendees=state.attendance.filter(x=>x.den===den);
  return `${intro('Plan a great den meeting','Den Leader Workspace','Den meetings, preparation and internal adventure progress—all in one place, without pretending to post to Scoutbook Plus.')}
