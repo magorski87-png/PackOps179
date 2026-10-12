@@ -4,6 +4,7 @@ export function financeInsights({snapshot,accounts=[],reimbursements=[],ledgerIm
  const out=[];
  if(snapshot.lastBalance===null)out.push({severity:'warning',title:'No verified balance snapshot',detail:'Import the current treasurer ledger before making spending decisions.'});
  if(snapshot.unclassified>0)out.push({severity:'warning',title:snapshot.unclassified+' ledger rows need classification',detail:'Review transfers, Scout-credit allocations and uncategorized transactions. Do not infer their financial purpose automatically.'});
+ if(snapshot.popcornTagged)out.push({severity:'warning',title:snapshot.popcornTagged+' legacy popcorn transactions need review',detail:'These are excluded from Pack income. Confirm whether they are restricted Scout credits or other transfers in Courtney’s ledger.'});
  const over=snapshot.expenseCats.filter(r=>r.actual>r.planned&&r.actual>0);
  for(const row of over.slice(0,6))out.push({severity:'warning',title:(row.category||'Uncategorized')+' is over its allocation',detail:'Classified spending exceeds this budget line by $'+round(row.actual-row.planned).toFixed(2)+'. Investigate before committing to further purchases.'});
  const open=reimbursements.filter(r=>!['declined','paid'].includes(r.status));
