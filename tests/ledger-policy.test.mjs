@@ -57,3 +57,12 @@ test('ledger import review flags inconsistent running balances',()=>{
  rows[3].balance+=10;
  assert.ok(ledgerImportReview(rows).balanceWarnings.length>0);
 });
+
+test('old popcorn tags require review and are not treated as Pack revenue',()=>{
+ const rows=parseLedgerCsv(sample);
+ const tags=[{id:rows[1].id,kind:'income',category:'Popcorn Fundraising'}];
+ const s=financialSnapshot({ledger:rows,tags});
+ assert.equal(s.received,0);
+ assert.equal(s.popcornTagged,1);
+ assert.equal(s.unclassified,4);
+});
