@@ -1,4 +1,4 @@
-import {TABLES,list,get,put,remove,readSetting,writeSetting,clearEverything,replaceAnnualBudget,replaceAnnualLedger} from './db.js';
+import {TABLES,list as localList,get,put as localPut,remove as localRemove,readSetting,writeSetting,clearEverything,replaceAnnualBudget as localReplaceAnnualBudget,replaceAnnualLedger as localReplaceAnnualLedger} from './db.js';
 import {LINKS,MENU,MEETING,DEN_NAMES,isoToday,makeId,money,esc,safeUrl,niceDate,summary,completion,csvParse,brief} from './data.js';
 import {authorize,connected,disconnect,selectFolder,uploadReceipt,uploadEncryptedBackup} from './drive.js';
 import {parseRoster,importPrivacySummary,denGroup,exportRoster,groupScouts,RANKS} from './roster-import.js';
@@ -14,13 +14,59 @@ import {currentScoutYear,duesForYear,scoutAccountYear,creditDifference,validScou
 import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from './settings-actions.js';
 import {normalizeGoogleConfiguration} from './google-config.js';
 import {EQUIPMENT_CATEGORIES,normalizeEquipment,queryEquipment,equipmentCsv} from './equipment-utils.js';
+import {PACK_CLOUD_CONFIG} from './cloud-config.js';
+import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest} from './cloud.js';
+import {cloudSettingsPanel} from './cloud-panel.js';
+import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
+import {familyResponseCsv} from './family-ui.js';
 
 const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
 let pwaInstallPrompt=null;
 const dbState=Object.fromEntries(TABLES.map(t=>[t,t==='settings'?[]:[]]));
-const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name',equipmentQuery:'',equipmentCategory:'all',equipmentSort:'name-asc',equipmentExport:'filtered',editEquipment:''};
+const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name',equipmentQuery:'',equipmentCategory:'all',equipmentSort:'name-asc',equipmentExport:'filtered',editEquipment:'',cloudError:'',cloudMembers:[],cloudInvites:[],familyForms:[],familyActive:'',familyResults:null,familySearch:'',familyLink:'',familyData:null,familySent:false,denChoice:''};
 const now=()=>Date.now();
+const cloudActive=()=>Boolean(cloudState().member);
+const cloudSettings=()=>({projectUrl:settings('supabaseUrl')||PACK_CLOUD_CONFIG.projectUrl,publishableKey:settings('supabasePublishableKey')||PACK_CLOUD_CONFIG.publishableKey,packId:settings('supabasePackId')||PACK_CLOUD_CONFIG.packId});
+const cloudConfigured=()=>Boolean(cloudSettings().projectUrl);
+async function put(table,row){return cloudActive()&&sharedTable(table)?saveCloudRow(table,row):localPut(table,row)}
+async function remove(table,id){return cloudActive()&&sharedTable(table)?deleteCloudRow(table,id):localRemove(table,id)}
+const list=table=>cloudActive()&&sharedTable(table)?fetchCloudRows(table):localList(table);
+async function replaceAnnualBudget(payload){
+ if(!cloudActive())return localReplaceAnnualBudget(payload);
+ // Cloud writes are separately protected operations; never claim cross-record atomicity.
+ for(const prior of payload.existing)await remove('budget',prior.id);
+ for(const next of payload.draft)await put('budget',next);
+ await put('financeAudit',payload.audit);
+ for(const s of payload.settings)await writeSetting(s.key,s.value);
+}
+async function replaceAnnualLedger({previous=[],next=[],year,importedAt}){
+ if(!cloudActive())return localReplaceAnnualLedger({previous,next,year,importedAt});
+ for(const prior of previous)await remove('financeLedger',prior.id);
+ for(const record of next)await put('financeLedger',record);
+ await writeSetting('financeLedgerImportedAt:'+year,importedAt);
+}
+async function setupCloud(){
+ const cfg=cloudSettings();if(!cfg.projectUrl)return;
+ try{await configureCloud({projectUrl:cfg.projectUrl,publishableKey:cfg.publishableKey,pack:cfg.packId});ui.cloudError='';}
+ catch(e){ui.cloudError=e.message;console.error('PackOps Cloud setup',e)}
+}
+async function loadCloudAdmin(){
+ if(!['admin','cubmaster'].includes(cloudState().member?.role)){ui.cloudMembers=[];ui.cloudInvites=[];return}
+ [ui.cloudMembers,ui.cloudInvites]=await Promise.all([listMembers(),listInvites()]);
+}
+async function loadFamilyForms(){
+ if(!cloudActive()){ui.familyForms=[];return}
+ ui.familyForms=await listFamilyForms();
+}
+async function openFamilyForm(id){
+ ui.familyActive=id;ui.familyResults=id?await getFamilyResponses(id):null;ui.familyLink='';ui.familySearch='';render();
+}
+async function loadFamilyToken(token){
+ if(!cloudState().configured){ui.cloudError='Family RSVP backend is not configured on this website.';render();return}
+ try{ui.familyData=await publicFamilyRequest('get',token);ui.cloudError='';}catch(e){ui.familyData=null;ui.cloudError=e.message;}
+ render();
+}
 const formData=(form,key)=>String(new FormData(form).get(key)||'').trim();
 const option=(value,label,current)=>`<option value="${esc(value)}"${String(value)===String(current)?' selected':''}>${esc(label)}</option>`;
 const btn=(label,action,klass='btn btn-ghost',extra='')=>`<button type="button" class="${klass}" data-action="${action}" ${extra}>${label}</button>`;
@@ -83,9 +129,10 @@ function route(view='home',event=''){
 }
 function restoreRoute(){
  const segments=location.hash.slice(1).split('/');
- ui.page=['home',...MENU.map(m=>m.id),'settings'].includes(segments[0])?segments[0]:'home';
+ ui.page=['home',...MENU.map(m=>m.id),'settings','family'].includes(segments[0])?segments[0]:'home';
  ui.eventId=segments[1]?decodeURIComponent(segments[1]):'';
  render();
+ if(ui.page==='family'&&ui.eventId&&(!ui.familyData||ui.familyToken!==ui.eventId)){ui.familyToken=ui.eventId;loadFamilyToken(ui.eventId).catch(e=>notify(e.message,true));}
 }
 function notify(message,error=false){
  const prior=document.querySelector('.toast');if(prior)prior.remove();
@@ -99,14 +146,17 @@ function render(){
   <aside class="sidebar"><div class="brand"><div class="brand-mark">179</div><div><strong>PackOps</strong><small>Leadership hub</small></div></div>
   <nav class="nav-list" aria-label="Main navigation"><button class="nav-link${ui.page==='home'?' active':''}" data-nav="home"><span class="emoji">🏡</span> Dashboard</button><div class="nav-label">Your tools</div>
   ${MENU.map(m=>`<button class="nav-link${ui.page===m.id?' active':''}" data-nav="${m.id}"><span class="emoji">${m.emoji}</span>${esc(m.label)}</button>`).join('')}</nav>
-  <div class="sidebar-footer"><small>Pack 179 · Built for the people making Scouting happen.<br>First version saves working data on this device.</small><button data-nav="settings">⚙ &nbsp; Settings & Drive</button></div></aside>
-  <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-nav="home" aria-label="Dashboard">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">● Local workspace</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
+  <div class="sidebar-footer"><small>Pack 179 · Built for the people making Scouting happen.<br>Records sync only after approved Google sign-in and backend setup.</small><button data-nav="settings">⚙ &nbsp; Settings & Drive</button></div></aside>
+  <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-nav="home" aria-label="Dashboard">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">${cloudActive()?'● Shared Pack workspace':'● Local / setup mode'}</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
   <div class="content">${view()}</div></main>
   <nav class="mobile-bottom no-print" aria-label="Mobile navigation">${[{id:'home',emoji:'🏡',name:'Home'},{id:'calendar',emoji:'🗓️',name:'Calendar'},{id:'budget',emoji:'📊',name:'Finance'},{id:'receipts',emoji:'🧾',name:'Receipts'},{id:'events',emoji:'✅',name:'Events'}].map(t=>`<button class="mobile-tab${ui.page===t.id?' active':''}" data-nav="${t.id}"><span class="emoji">${t.emoji}</span>${t.name}</button>`).join('')}</nav>
  </div>`;
 }
-function view(){switch(ui.page){
- case 'home':return home();case 'calendar':return calendar();case 'budget':return budget();case 'receipts':return receipts();case 'meeting':return meeting();case 'volunteers':return volunteers();case 'events':return events();case 'roster':return roster();case 'equipment':return equipment();case 'assistant':return assistant();case 'library':return library();case 'settings':return settingsPage();default:return home();}}
+function view(){
+ if(ui.page==='family')return familyPublicPage();
+ if(cloudConfigured()&&!cloudActive()&&ui.page!=='settings')return `${intro('Private Pack workspace','Google sign-in required','This Pack uses a secure shared backend. Sign in with an approved leader account before viewing rosters, financial records, or event workspaces.')}${btn('Open security settings','goto-settings','btn')}`;
+ switch(ui.page){
+ case 'families':return families();case 'den':return denWorkspace();case 'home':return home();case 'calendar':return calendar();case 'budget':return budget();case 'receipts':return receipts();case 'meeting':return meeting();case 'volunteers':return volunteers();case 'events':return events();case 'roster':return roster();case 'equipment':return equipment();case 'assistant':return assistant();case 'library':return library();case 'settings':return settingsPage();default:return home();}}
 function home(){
  const s=summary(dbState.tasks);const next=upcomingRecords()[0];
  return `<section class="hero"><div class="hero-copy"><span class="eyebrow" style="color:#eed69e">WELCOME TO PACKOPS</span><h2>Less organizing. More Scouting.</h2><p>Your Pack calendar, event planning, meeting guides, records and tools—all in one place, without replacing Scoutbook Plus.</p><div class="hero-action">${btn('✨ Review priorities','goto-assistant','btn btn-gold')}</div></div><div class="hero-symbol">⚜️</div></section>
