@@ -1,3 +1,26 @@
+# PackOps 179 · v0.4 Calendar Workspaces & Budget Wizard
+
+This is a mobile-first, installable PWA. Its GitHub Pages code is public. **Never put private Scout or finance data in the GitHub repository.**
+
+## Calendar → Event Workspace
+
+From **Pack Calendar**, authorize Google Calendar, select Pack 179, and refresh. Clicking **Plan this event** creates one local workspace for the Google event; **Open workspace** reopens it. Later refreshes update its title, date, time, location, description and original link without erasing checklists, notes, event budget lines, receipt links, reimbursements, assignments or attachments. Google Calendar and Scoutbook are never written to by this integration. A ChatGPT Google connection does not automatically authorize the deployed PWA.
+
+## Guided budget planning
+
+Use **Pack Finance → Budget Builder → Guided Budget Wizard**. Choose the 2026–27 template, prior-year PackOps budget or a blank draft. Enter Scout/adult counts, active-year dues and fundraising assumptions; edit all proposed annual expenses; then review income, expenses, fundraising gross-sales target and funding difference. Save explicitly as a **DRAFT**. The app atomically archives and replaces only the active year's budget. The treasurer ledger and other Scout years remain untouched. This is not a committee approval.
+
+## Year-specific records and reporting
+
+**Settings & Drive → Authoritative Google Drive sources** accepts separate Scout-credit sheet, treasurer ledger workbook, approved budget document and receipts folder links for every Scout year. Authorized native Google Sheets account refresh is read-only. Treasurer XLSX ledger actuals still require a CSV import. Reimbursements now link to persistent event workspace IDs; receipt intake and budget lines also attach to events. Financial alerts flag ledger classification gaps, budget overruns, older snapshots, pending reimbursements and Scout-account discrepancies. Reports export Scout-name-free category summaries, with print isolation. Forecasts offer baseline and downside estimates.
+
+## Safe recovery
+
+Create and upload an encrypted backup to a restricted Drive folder in Settings to recover local records on another device. Restore is a point-in-time **replacement**, not shared synchronization; it does not alter official Google sources. Read [DATA_RECOVERY.md](DATA_RECOVERY.md).
+
+**Not yet production-ready:** No enforced multi-user backend or real-time cross-device sync, automatic Excel ledger updates, parent self-service submission, Google Calendar writes, or production-ready receipt OCR. These need a secure backend and account setup. Keep private Scout data off shared devices.
+
+---
 # PackOps 179 · v0.3 Finance Expansion
 
 A mobile-first, installable leadership PWA for Pack 179. Public app code; **Pack documents and Scout financial data must remain private**.
