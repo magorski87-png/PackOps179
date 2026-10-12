@@ -651,6 +651,52 @@ function openBlob(blob){const url=URL.createObjectURL(blob);const opened=window.
 async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
+  case 'cloud-config':{
+   const projectUrl=f('projectUrl'),publishableKey=f('publishableKey'),packId=f('packId');
+   if(/service_role|sb_secret_/i.test(publishableKey))throw Error('Never enter a Supabase secret key in a browser');
+   await configureCloud({projectUrl,publishableKey,pack:packId});
+   await writeSetting('supabaseUrl',projectUrl);await writeSetting('supabasePublishableKey',publishableKey);await writeSetting('supabasePackId',packId);
+   ui.cloudError='';await loadCloudAdmin();await loadFamilyForms();await refresh();notify('Secure backend configured. Use Continue with Google if needed.');return;
+  }
+  case 'cloud-invite-leader':{
+   const denScopes=f('dens').split(',').map(x=>x.trim()).filter(Boolean);
+   await addLeaderInvite({email:f('email'),role:f('role'),denScopes});
+   await loadCloudAdmin();render();notify('Leader invitation approved. Ask that leader to sign into PackOps with this email.');return;
+  }
+  case 'family-form-create':{
+   if(!cloudActive())throw Error('Sign in and activate the Pack shared database first');
+   const kind=f('kind'),options=f('options').split(',').map(s=>s.trim()).filter(Boolean);
+   if(!['rsvp','poll','volunteer'].includes(kind))throw Error('Unsupported response type');
+   if(kind!=='rsvp'&&(options.length<1||options.length>30))throw Error('Provide the poll choices or volunteer position names separated by commas');
+   const member=cloudState().member;
+   const den=f('den')||(member?.role==='den_leader'?(member.den_scopes||[])[0]:'');
+   const item=await createFamilyForm({title:f('title'),kind,description:f('description'),event_id:f('eventId')||null,den_scope:den||null,questions:kind==='rsvp'?[]:[{label:kind==='poll'?'Choose an option':'Choose a position',options}],status:'open'});
+   await loadFamilyForms();await openFamilyForm(item.id);notify('Family response form published. Invite households individually.');return;
+  }
+  case 'family-invite':{
+   const sendEmail=form.elements.sendEmail?.checked||false;
+   const result=await inviteFamily(f('formId'),f('recipientLabel'),f('recipientEmail'),sendEmail);
+   ui.familyLink=result.url;
+   ui.familyResults=await getFamilyResponses(f('formId'));
+   render();
+   notify(result.emailed?'Invitation email sent':'Private link generated. Copy it and share with the intended household.');return;
+  }
+  case 'family-public-response':{
+   if(!ui.familyToken)throw Error('Open a private invitation link first');
+   const answer=ui.familyData?.kind==='rsvp'?{status:f('status'),adults:Number(f('adults')),children:Number(f('children'))}:{choice:f('choice')};
+   const result=await publicFamilyRequest('respond',ui.familyToken,answer);
+   ui.familySent=!!result.success;render();notify('Family response recorded.');return;
+  }
+  case 'den-plan':{
+   if(!ui.denChoice)throw Error('Choose a den first');
+   await put('denPlans',{id:makeId(),den:ui.denChoice,title:f('title'),date:f('date'),agenda:f('agenda'),supplies:f('supplies'),createdAt:now()});
+   await refresh();notify('Den meeting plan saved');return;
+  }
+  case 'den-progress':{
+   if(!ui.denChoice||!f('scoutId'))throw Error('Choose an assigned den and Scout first');
+   await put('adventureProgress',{id:makeId(),den:ui.denChoice,scoutId:f('scoutId'),adventure:f('adventure'),status:f('status'),createdAt:now()});
+   await refresh();notify('Internal advancement progress recorded (not posted to Scoutbook)');return;
+  }
   case 'drive-year-sources':{
    const year=activeYear(),credit=f('creditUrl'),ledger=f('ledgerUrl'),budgetUrl=f('budgetUrl'),receipts=f('receiptsUrl');
    if(credit)googleSheetIdFromUrl(credit);
@@ -868,7 +914,17 @@ window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();pwa
 window.addEventListener('appinstalled',()=>{pwaInstallPrompt=null;render();notify('PackOps installed as a standalone app')});
 window.addEventListener('hashchange',restoreRoute);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
-refresh().then(restoreRoute).catch(err=>{
+(async()=>{
+ // Read local configuration first, then connect Google/Supabase before rendering private views.
+ const rows=await Promise.all(TABLES.map(t=>localList(t)));
+ TABLES.forEach((name,i)=>dbState[name]=rows[i]);
+ await setupCloud();
+ if(cloudActive()){
+  await loadCloudAdmin();
+  await loadFamilyForms();
+ }
+ await refresh();restoreRoute();
+})().catch(err=>{
  console.error('PackOps initialization error:',err);
  root.innerHTML='<main style="padding:30px;max-width:680px;margin:auto"><h1>PackOps could not open local storage</h1><p>Try a normal browser window (not private browsing) and make sure site storage is allowed. No files were changed.</p></main>';
 });
