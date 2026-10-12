@@ -1,3 +1,15 @@
+# PackOps v0.6 — Secure Shared Workspace & Family Responses
+
+This release adds **equipment search, category filters, editing, quantities and CSV export**, a **Den Leader meeting/adventure workspace**, a **family RSVP, poll and volunteer response portal**, plus source code for **Supabase Google login, approved users, den-restricted database records, shared finances, Real-time update signals, audit history, private receipts metadata and encrypted administrator backups**.
+
+**SECURITY / DEPLOYMENT STATUS:** GitHub Pages serves the frontend, but the Supabase cloud service is **NOT automatically provisioned**. Do not import real youth records to the cloud until you complete `SUPABASE_SETUP.md`, apply and test the SQL policies, configure Google OAuth and deploy the Family RSVP Edge Function. Without a configured cloud, PackOps remains a device-local workspace, and no family invitations can be sent.
+
+The Pack's official treasurer ledger, individual Scout credits, receipts, and source documents remain in Google Drive; Google Calendar and Drive permissions remain separate. Neither SignUpGenius nor Scoutbook Plus has a live API connector. SMS/push, multi-question surveys, enforced volunteer slot limits and offline queued synchronization are not included in this iteration.
+
+[Read the secure PackOps v0.6 setup instructions](SUPABASE_SETUP.md).
+
+---
+
 # PackOps 179 · v0.5 Cub Scout Theme & Ledger-Based Finance
 
 **Pack 179 income policy:** Pack operations are primarily supported by annual dues. A VFW or another community organization may make occasional donations, but the budget assumes **$0 donations** until explicitly planned. The Pack currently receives **$0 operating fundraising income from popcorn sales**. Scout popcorn earnings belong in individual Scout-credit accounting, not Pack revenue.
