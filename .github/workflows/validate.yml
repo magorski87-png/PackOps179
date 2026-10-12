@@ -1,0 +1,28 @@
+name: Validate PackOps
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Build and verify files
+        run: |
+          npm run build
+          test -f dist/finance-ui.js
+          test -f dist/calendar-api.js
+          test -f dist/backup.js
+          test -f dist/settings-actions.js
