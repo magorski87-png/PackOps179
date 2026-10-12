@@ -1,6 +1,6 @@
 // PackOps v0.6 shared backend. Browser gets ONLY Supabase publishable/anon key.
 // Never put service_role keys, Google OAuth secrets or email credentials here.
-export const SHARED_TABLES=['events','tasks','equipment','roster','budget','financeLedger','financeAccounts','financeAdjustments','financeReimbursements','financeTags','financeAudit','denPlans','adventureProgress','attendance'];
+export const SHARED_TABLES=['events','tasks','equipment','roster','budget','financeLedger','financeAccounts','financeAdjustments','financeReimbursements','financeTags','financeAudit','receipts','denPlans','adventureProgress','attendance'];
 export const CLOUD_ROLES=['admin','cubmaster','treasurer','den_leader','volunteer'];
 let client=null,packId='',user=null,member=null,url='';
 let remoteLoad=null;
@@ -64,7 +64,7 @@ export async function migrateLocalRecords(localData){
  requireMember();if(!['admin','cubmaster'].includes(member.role))throw Error('Only Pack administrators may import existing local Pack records.');
  const totals={};
  for(const table of SHARED_TABLES){
-  const records=localData[table]||[];let added=0;
+  const records=table==='receipts'?(localData[table]||[]).filter(row=>row.driveFileId).map(({blob,...r})=>r):(localData[table]||[]);let added=0;
   for(let k=0;k<records.length;k+=50){
    const batch=records.slice(k,k+50).filter(row=>row?.id).map(row=>({pack_id:packId,table_name:table,record_id:String(row.id),den_scope:row.den||null,payload:row}));
    if(!batch.length)continue;
