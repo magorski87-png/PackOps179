@@ -4,6 +4,7 @@ import {authorize,connected,disconnect,selectFolder,uploadReceipt,uploadEncrypte
 import {parseRoster,importPrivacySummary,denGroup,exportRoster,groupScouts,RANKS} from './roster-import.js';
 import {calendarAuthorize,calendarList,calendarUpcoming,disconnectCalendar,calendarConnected} from './calendar-api.js';
 import {parseIcs,uniqueUpcoming} from './calendar-import.js';
+import {linkedWorkspaceId,matchExistingWorkspace,workspaceForCalendarEvent,workspaceForSync} from './event-sync.js';
 import {financeView} from './finance-ui.js';
 import {parseLedgerCsv,parseScoutCreditsCsv,financialSnapshot,reimbursePaidAllowed,csvExport,reportsRows,amount,EXPENSE_CATEGORIES} from './finance.js';
 import {fetchScoutCreditSnapshot} from './finance-google.js';
@@ -30,7 +31,24 @@ const findEvent=id=>dbState.events.find(e=>e.id===id);
 const eventLabel=id=>findEvent(id)?.title||'General Pack operations';
 const eventOptions=()=>[['','General Pack operations'],...dbState.events.map(e=>[e.id,e.title])];
 const packLinkFolder=LINKS.packDrive;
-const upcomingRecords=()=>uniqueUpcoming([...dbState.calendarEvents,...ui.googleEvents,...dbState.events.map(e=>({...e,source:'PackOps workspace'}))],isoToday());
+const upcomingRecords=()=>{
+ const liveIds=new Set(ui.googleEvents.map(e=>e.id));
+ return uniqueUpcoming([...dbState.calendarEvents,...ui.googleEvents,...dbState.events.filter(e=>!e.googleEventId||!liveIds.has(e.googleEventId)).map(e=>({...e,source:'PackOps workspace'}))],isoToday());
+};
+async function fetchLinkedCalendar(calendarId){
+ ui.googleEvents=await calendarUpcoming(settings('googleClientId'),calendarId);
+ ui.calendarFetchedAt=now();
+ // Only update EXISTING workspaces. Calendar retrieval never creates planning records or overwrites notes.
+ for(const event of ui.googleEvents){
+  const next=workspaceForSync(event,dbState.events,now());
+  if(next){
+   const before=matchExistingWorkspace(event,dbState.events);
+   if(before && ['title','date','time','endTime','location','calendarUrl','description'].some(k=>(before[k]||'')!==(next[k]||'')))await put('events',next);
+  }
+ }
+ await refresh();
+ return ui.googleEvents.length;
+}
 const rosterRows=()=>{const q=ui.rosterFilter.trim().toLowerCase();return groupScouts(dbState.roster).filter(r=>(ui.rosterDen==='all'||(r.den||'Unassigned')===ui.rosterDen)&&(ui.rosterRank==='all'||r.rank===ui.rosterRank)&&(!ui.rosterReview||(r.issues||[]).length>0)&&[r.name,r.den,r.rank,r.guardian,r.email].some(v=>String(v||'').toLowerCase().includes(q))).sort((a,b)=>{const key=ui.rosterSort;return String(a[key]||'').localeCompare(String(b[key]||''),undefined,{numeric:true,sensitivity:'base'})||a.name.localeCompare(b.name)})};
 const intro=(kicker,title,desc,right='')=>`<div class="page-head"><div><span class="eyebrow">${esc(kicker)}</span><h1>${esc(title)}</h1><p>${esc(desc)}</p></div>${right?`<div class="no-print">${right}</div>`:''}</div>`;
 const note=(msg,warning=false)=>`<div class="note${warning?' warn':''}">${msg}</div>`;
@@ -325,7 +343,7 @@ async function handleAction(action,trigger){
   case 'calendar-use-pack':{
    await writeSetting('calendarId',PACK_CALENDAR_ID);await writeSetting('calendarName','Pack 179 Calendar (26–27)');
    ui.calendarFetchedAt=0;ui.googleEvents=[];await refresh();
-   if(settings('googleClientId')){try{ui.googleEvents=await calendarUpcoming(settings('googleClientId'),PACK_CALENDAR_ID);ui.calendarFetchedAt=now();await refresh();notify(`Loaded ${ui.googleEvents.length} Pack 179 calendar events`)}catch(e){notify('Pack calendar selected. To fetch events, authorize Google Calendar: '+e.message,true)}}
+   if(settings('googleClientId')){try{const count=await fetchLinkedCalendar(PACK_CALENDAR_ID);notify(`Loaded ${count} Pack 179 calendar events and updated linked workspaces`)}catch(e){notify('Pack calendar selected. To fetch events, authorize Google Calendar: '+e.message,true)}}
    else notify('Pack calendar selected. Add your OAuth Client ID in Settings to read events.');return;
   }
   case 'calendar-connect':{
@@ -334,7 +352,7 @@ async function handleAction(action,trigger){
   }
   case 'calendar-refresh':{
    const calendarId=settings('calendarId');if(!calendarId)throw Error('Select a calendar first');
-   ui.googleEvents=await calendarUpcoming(settings('googleClientId'),calendarId);ui.calendarFetchedAt=now();render();notify(`Loaded ${ui.googleEvents.length} upcoming events (read-only)`);return;
+   const count=await fetchLinkedCalendar(calendarId);notify(`Loaded ${count} upcoming events and updated linked workspaces`);return;
   }
   case 'clear-ics':if(askDelete('Remove the locally imported iCalendar snapshot? No Google Calendar events will be modified.')){for(const e of dbState.calendarEvents)await remove('calendarEvents',e.id);await refresh();notify('Local calendar snapshot removed')}return;
   case 'roster-select-all':for(const r of rosterRows())ui.rosterSelected.add(r.id);render();return;
@@ -519,7 +537,7 @@ root.addEventListener('change',async event=>{
  if(target.dataset.change==='calendar-pick'){
   const id=target.value,name=ui.calendars.find(c=>c.id===id)?.name||'Selected calendar';
   await writeSetting('calendarId',id);await writeSetting('calendarName',name);ui.googleEvents=[];ui.calendarFetchedAt=0;
-  await refresh();if(id){try{ui.googleEvents=await calendarUpcoming(settings('googleClientId'),id);ui.calendarFetchedAt=now();render();notify(`Loaded ${ui.googleEvents.length} upcoming Google events`)}catch(e){notify(String(e.message),true)}}return;
+  await refresh();if(id){try{const count=await fetchLinkedCalendar(id);notify(`Loaded ${count} upcoming Google events and updated linked workspaces`)}catch(e){notify(String(e.message),true)}}return;
  }
  if(target.dataset.change==='roster-select'){
   if(target.checked)ui.rosterSelected.add(target.dataset.id);else ui.rosterSelected.delete(target.dataset.id);
