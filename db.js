@@ -37,6 +37,23 @@ export const put=(table,value)=>transact(table,'readwrite',s=>s.put(value));
 export const remove=(table,key)=>transact(table,'readwrite',s=>s.delete(key));
 export async function readSetting(key){return (await get('settings',key))?.value||'';}
 export async function writeSetting(key,value){return put('settings',{key,value});}
+// One transaction avoids partially restored data if the browser rejects an import.
+export async function replaceAllTables(snapshot){
+ const db=await openDb();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction(TABLES,'readwrite');
+  tx.oncomplete=()=>resolve();
+  tx.onerror=()=>reject(tx.error||new Error('Backup restore failed; original data retained'));
+  tx.onabort=()=>reject(tx.error||new Error('Backup restore cancelled'));
+  try{
+   for(const table of TABLES){
+    const store=tx.objectStore(table);
+    store.clear();
+    for(const row of snapshot[table])store.put(row);
+   }
+  }catch(error){tx.abort();reject(error);}
+ });
+}
 export async function clearEverything(){
   const db=await openDb();db.close();instancePromise=undefined;
   await new Promise((resolve,reject)=>{const req=indexedDB.deleteDatabase(DB_NAME);req.onsuccess=resolve;req.onerror=()=>reject(req.error);req.onblocked=()=>reject(new Error('Close other PackOps tabs before clearing data'))});
