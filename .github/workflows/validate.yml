@@ -17,6 +17,9 @@ jobs:
           cache: npm
       - name: Install
         run: npm ci
+      - name: Check JavaScript syntax
+        run: |
+          for file in *.js; do node --check "$file"; done
       - name: Test
         run: npm test
       - name: Build and verify files
