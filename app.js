@@ -277,7 +277,7 @@ async function handleAction(action,trigger){
    const parsed=parseScoutCreditsCsv(result.csv,dues);
    if(!window.confirm(`Refresh ${parsed.scouts.length} Scout credit records on this device? Previous local snapshot will be replaced. The original Google Sheet will not change.`))return;
    for(const row of dbState.financeAccounts.filter(r=>scoutAccountYear(r)===activeYear()))await remove('financeAccounts',row.id);
-   for(const row of parsed.scouts)await put('financeAccounts',{...row,sourceYear:activeYear()});
+   for(const row of parsed.scouts)await put('financeAccounts',{...row,id:activeYear()==='2026-27'?row.id:activeYear()+':'+row.id,sourceYear:activeYear()});
    await writeSetting('financeAccountsImportedAt',result.syncedAt);
    await refresh();notify(`Refreshed ${parsed.scouts.length} Scout account records from Google (read-only)`);return;
   }
@@ -452,7 +452,7 @@ async function handleForm(form){
    const parsed=parseScoutCreditsCsv(await file.text(),dues);
    if(!askDelete(`Replace LOCAL Scout credit snapshot with ${parsed.scouts.length} records? ${parsed.continuationRows} guardian continuation rows are intentionally not stored in finance.`))return;
    for(const row of dbState.financeAccounts.filter(r=>scoutAccountYear(r)===activeYear()))await remove('financeAccounts',row.id);
-   for(const row of parsed.scouts)await put('financeAccounts',{...row,sourceYear:activeYear()});
+   for(const row of parsed.scouts)await put('financeAccounts',{...row,id:activeYear()==='2026-27'?row.id:activeYear()+':'+row.id,sourceYear:activeYear()});
    await writeSetting('financeAccountsImportedAt',new Date().toISOString());
    await refresh();notify(`Imported ${parsed.scouts.length} Scout financial records locally`);return;
   }
