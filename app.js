@@ -15,7 +15,7 @@ import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from '
 import {normalizeGoogleConfiguration} from './google-config.js';
 import {EQUIPMENT_CATEGORIES,normalizeEquipment,queryEquipment,equipmentCsv} from './equipment-utils.js';
 import {PACK_CLOUD_CONFIG} from './cloud-config.js';
-import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest} from './cloud.js';
+import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,watchCloudChanges,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest} from './cloud.js';
 import {cloudSettingsPanel} from './cloud-panel.js';
 import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
 import {familyResponseCsv} from './family-ui.js';
@@ -67,8 +67,16 @@ async function replaceAnnualLedger({previous=[],next=[],year,importedAt}){
 }
 async function setupCloud(){
  const cfg=cloudSettings();if(!cfg.projectUrl)return;
- try{await configureCloud({projectUrl:cfg.projectUrl,publishableKey:cfg.publishableKey,pack:cfg.packId});ui.cloudError='';}
+ try{await configureCloud({projectUrl:cfg.projectUrl,publishableKey:cfg.publishableKey,pack:cfg.packId});ui.cloudError='';ensureRealtime();}
  catch(e){ui.cloudError=e.message;console.error('PackOps Cloud setup',e)}
+}
+function ensureRealtime(){
+ if(!cloudActive())return;
+ watchCloudChanges(()=>{
+  const typing=root.querySelector('input:focus,textarea:focus,select:focus');
+  if(document.hidden||typing){ui.cloudChanged=true;return}
+  refresh().catch(e=>console.warn('Realtime refresh failed',e));
+ });
 }
 async function loadCloudAdmin(){
  if(!['admin','cubmaster'].includes(cloudState().member?.role)){ui.cloudMembers=[];ui.cloudInvites=[];return}
@@ -166,7 +174,7 @@ function render(){
   <nav class="nav-list" aria-label="Main navigation"><button class="nav-link${ui.page==='home'?' active':''}" data-nav="home"><span class="emoji">🏡</span> Dashboard</button><div class="nav-label">Your tools</div>
   ${MENU.map(m=>`<button class="nav-link${ui.page===m.id?' active':''}" data-nav="${m.id}"><span class="emoji">${m.emoji}</span>${esc(m.label)}</button>`).join('')}</nav>
   <div class="sidebar-footer"><small>Pack 179 · Built for the people making Scouting happen.<br>Records sync only after approved Google sign-in and backend setup.</small><button data-nav="settings">⚙ &nbsp; Settings & Drive</button></div></aside>
-  <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-nav="home" aria-label="Dashboard">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">${cloudActive()?'● Shared Pack workspace':'● Local / setup mode'}</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
+  <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-nav="home" aria-label="Dashboard">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">${cloudActive()?'● Shared Pack workspace${ui.cloudChanged?' · Refresh recommended':''}':'● Local / setup mode'}</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
   <div class="content">${view()}</div></main>
   <nav class="mobile-bottom no-print" aria-label="Mobile navigation">${[{id:'home',emoji:'🏡',name:'Home'},{id:'calendar',emoji:'🗓️',name:'Calendar'},{id:'budget',emoji:'📊',name:'Finance'},{id:'receipts',emoji:'🧾',name:'Receipts'},{id:'events',emoji:'✅',name:'Events'}].map(t=>`<button class="mobile-tab${ui.page===t.id?' active':''}" data-nav="${t.id}"><span class="emoji">${t.emoji}</span>${t.name}</button>`).join('')}</nav>
  </div>`;
@@ -415,7 +423,7 @@ async function handleAction(action,trigger){
  switch(action){
   case 'cloud-sign-in':await googleCloudLogin();return;
   case 'cloud-sign-out':await googleCloudLogout();ui.cloudMembers=[];ui.cloudInvites=[];await refresh();route('settings');return;
-  case 'cloud-refresh':await syncCloudIdentity();await loadCloudAdmin();await loadFamilyForms();await refresh();notify('Shared data refreshed from Supabase');return;
+  case 'cloud-refresh':await syncCloudIdentity();ensureRealtime();await loadCloudAdmin();await loadFamilyForms();await refresh();notify('Shared data refreshed from Supabase');return;
   case 'cloud-migrate':{
    if(!cloudActive())throw Error('Sign in as Pack administrator first');
    const tables=Object.fromEntries(await Promise.all(TABLES.filter(sharedTable).map(async name=>[name,await localList(name)])));
@@ -701,6 +709,7 @@ async function handleForm(form){
    if(/service_role|sb_secret_/i.test(publishableKey))throw Error('Never enter a Supabase secret key in a browser');
    await configureCloud({projectUrl,publishableKey,pack:packId});
    await writeSetting('supabaseUrl',projectUrl);await writeSetting('supabasePublishableKey',publishableKey);await writeSetting('supabasePackId',packId);
+   ensureRealtime();
    ui.cloudError='';await loadCloudAdmin();await loadFamilyForms();await refresh();notify('Secure backend configured. Use Continue with Google if needed.');return;
   }
   case 'cloud-invite-leader':{
@@ -964,6 +973,7 @@ root.addEventListener('input',event=>{
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();pwaInstallPrompt=event;render()});
 window.addEventListener('appinstalled',()=>{pwaInstallPrompt=null;render();notify('PackOps installed as a standalone app')});
 window.addEventListener('hashchange',restoreRoute);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&cloudActive()&&!root.querySelector('input:focus,textarea:focus')){ui.cloudChanged=false;refresh().catch(e=>console.warn('Refresh while returning to PackOps failed',e))}});
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 (async()=>{
  // Read local configuration first, then connect Google/Supabase before rendering private views.
