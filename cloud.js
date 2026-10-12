@@ -3,7 +3,7 @@
 export const SHARED_TABLES=['events','tasks','equipment','roster','budget','financeLedger','financeAccounts','financeAdjustments','financeReimbursements','financeTags','financeAudit','receipts','denPlans','adventureProgress','attendance'];
 export const CLOUD_ROLES=['admin','cubmaster','treasurer','den_leader','volunteer'];
 let client=null,packId='',user=null,member=null,url='';
-let remoteLoad=null;
+let remoteLoad=null;let changesChannel=null;
 export function cloudState(){return {configured:!!client,packId,authenticated:!!user,member,user:{email:user?.email||'',id:user?.id||''},url};}
 export function sharedTable(name){return SHARED_TABLES.includes(name)}
 const fail=({error},context)=>{if(error)throw Error(context+': '+error.message);};
@@ -38,7 +38,7 @@ export async function googleCloudLogin(){
  const {error}=await client.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin+location.pathname+'#settings'}});
  if(error)throw Error(error.message);
 }
-export async function googleCloudLogout(){if(client){const {error}=await client.auth.signOut();fail({error},'Sign out')}user=null;member=null}
+export async function googleCloudLogout(){await stopCloudChanges();if(client){const {error}=await client.auth.signOut();fail({error},'Sign out')}user=null;member=null}
 function requireMember(){if(!client||!member||!user)throw Error('An approved PackOps Google login is required.');}
 export async function fetchCloudRows(table){
  requireMember();if(!sharedTable(table))throw Error('Table is not configured for shared storage.');
@@ -112,4 +112,15 @@ export async function publicFamilyRequest(action,token,answer={}){
  if(!client)throw Error('PackOps backend is not configured on this device. Open the regular PackOps link with cloud settings configured.');
  const {data,error}=await client.functions.invoke('family-rsvp',{body:{action,token,answer}});
  fail({error},'Family response');if(data?.error)throw Error(data.error);return data;
+}
+
+export function watchCloudChanges(callback){
+ requireMember();
+ if(changesChannel)return;
+ changesChannel=client.channel('packops-records-'+packId).on('postgres_changes',{
+  event:'*',schema:'public',table:'pack_records',filter:'pack_id=eq.'+packId
+ },()=>callback()).subscribe();
+}
+export async function stopCloudChanges(){
+ if(client&&changesChannel){await client.removeChannel(changesChannel);changesChannel=null}
 }
