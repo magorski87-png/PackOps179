@@ -390,7 +390,11 @@ async function handleAction(action,trigger){
    const s=financialSnapshot({budget:dbState.budget.filter(x=>(x.year||'2026-27')===year),ledger,tags,reimbursements:dbState.financeReimbursements.filter(x=>scoutAccountYear(x)===year)});
    downloadCsv(csvExport(reportsRows(s),['Category','Planned','Actual','Variance']),`Pack179_Committee_Budget_${isoToday()}.csv`);notify('Committee category-only report exported');return;
   }
-  case 'finance-print-report':window.print();return;
+  case 'finance-print-report':{
+   document.body.classList.add('print-finance');
+   window.addEventListener('afterprint',()=>document.body.classList.remove('print-finance'),{once:true});
+   window.print();return;
+  }
   case 'goto-settings':route('settings');return;
   case 'goto-calendar':route('calendar');return;
   case 'install-pwa':{
