@@ -276,7 +276,7 @@ async function handleAction(action,trigger){
    const dues=annualDues();if(dues===null)throw Error('Set annual dues for '+activeYear()+' in Settings first');
    const parsed=parseScoutCreditsCsv(result.csv,dues);
    if(!window.confirm(`Refresh ${parsed.scouts.length} Scout credit records on this device? Previous local snapshot will be replaced. The original Google Sheet will not change.`))return;
-   for(const row of dbState.financeAccounts)await remove('financeAccounts',row.id);
+   for(const row of dbState.financeAccounts.filter(r=>scoutAccountYear(r)===activeYear()))await remove('financeAccounts',row.id);
    for(const row of parsed.scouts)await put('financeAccounts',{...row,sourceYear:activeYear()});
    await writeSetting('financeAccountsImportedAt',result.syncedAt);
    await refresh();notify(`Refreshed ${parsed.scouts.length} Scout account records from Google (read-only)`);return;
@@ -425,7 +425,7 @@ async function handleForm(form){
   }
   case 'finance-reimbursement':{
    const v=Number(f('amount'));if(!Number.isFinite(v)||v<=0||v>1e7)throw Error('Enter a valid reimbursement amount');
-   await put('financeReimbursements',{id:makeId(),requester:f('requester'),amount:Math.round(v*100)/100,date:f('date'),eventTitle:f('eventTitle'),category:f('category'),notes:f('notes'),receiptId:f('receiptId'),status:'submitted',createdAt:now()});break;
+   await put('financeReimbursements',{id:makeId(),requester:f('requester'),amount:Math.round(v*100)/100,date:f('date'),eventTitle:f('eventTitle'),category:f('category'),notes:f('notes'),receiptId:f('receiptId'),sourceYear:activeYear(),status:'submitted',createdAt:now()});break;
   }
   case 'finance-fundraising':{
    const goal=Number(f('target')),rate=Number(f('rate')),members=Number(f('members'));
@@ -440,20 +440,20 @@ async function handleForm(form){
    const file=form.elements.file.files?.[0];if(!file||file.size>3*1024*1024)throw Error('Select a ledger CSV smaller than 3 MB');
    const rows=parseLedgerCsv(await file.text());
    if(!askDelete(`Replace local treasurer ledger snapshot with ${rows.length} rows? The original Drive workbook is never edited.`))return;
-   for(const row of dbState.financeLedger)await remove('financeLedger',row.id);
-   for(const row of rows)await put('financeLedger',row);
+   for(const row of dbState.financeLedger.filter(r=>scoutAccountYear(r)===activeYear()))await remove('financeLedger',row.id);
+   for(const row of rows)await put('financeLedger',{...row,sourceYear:activeYear()});
    await writeSetting('financeLedgerImportedAt',new Date().toISOString());
    await refresh();notify(`${rows.length} treasurer ledger entries imported read-only`);return;
   }
   case 'finance-import-accounts':{
    const file=form.elements.file.files?.[0];if(!file||file.size>3*1024*1024)throw Error('Select a Scout credit CSV smaller than 3 MB');
    if(!form.elements.privateDevice?.checked)throw Error('Use a private, trusted device');
-   const dues=Number(f('dues'));if(!Number.isFinite(dues)||dues<0||dues>10000)throw Error('Use a valid annual dues assumption');
+   const dues=annualDues();if(dues===null)throw Error('Set the annual dues for '+activeYear()+' in Settings first');
    const parsed=parseScoutCreditsCsv(await file.text(),dues);
    if(!askDelete(`Replace LOCAL Scout credit snapshot with ${parsed.scouts.length} records? ${parsed.continuationRows} guardian continuation rows are intentionally not stored in finance.`))return;
-   for(const row of dbState.financeAccounts)await remove('financeAccounts',row.id);
+   for(const row of dbState.financeAccounts.filter(r=>scoutAccountYear(r)===activeYear()))await remove('financeAccounts',row.id);
    for(const row of parsed.scouts)await put('financeAccounts',{...row,sourceYear:activeYear()});
-   await writeSetting('financeDues',String(dues));await writeSetting('financeAccountsImportedAt',new Date().toISOString());
+   await writeSetting('financeAccountsImportedAt',new Date().toISOString());
    await refresh();notify(`Imported ${parsed.scouts.length} Scout financial records locally`);return;
   }
   case 'budget':await put('budget',{id:makeId(),category:f('category'),planned:Number(f('planned')),actual:Number(f('actual')),note:f('note')});break;
