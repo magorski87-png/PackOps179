@@ -62,3 +62,15 @@
 .finance-itemize>strong{font-size:13px}.finance-itemize p{font-size:12px}
 
 @media(max-width:1000px){.mobile-bottom{grid-template-columns:repeat(5,minmax(0,1fr))}}
+
+/* Focused one-click committee report: suppress all other private UI when printing. */
+@media print{
+ body.print-finance .app *{visibility:hidden!important}
+ body.print-finance .finance-report,body.print-finance .finance-report *{visibility:visible!important}
+ body.print-finance .finance-report{position:absolute!important;left:0;top:0;width:100%!important;border:0!important;box-shadow:none!important}
+ body.print-finance .finance-report .finance-table{min-width:0;font-size:10pt}
+}
+.budget-wizard{border:2px solid #d2e5d6;background:#f9fdf8}
+.budget-wizard h3{font-size:14px;margin:15px 0 3px}
+.budget-wizard .row-between label{font-weight:600;font-size:13px}
+@media(max-width:600px){.budget-wizard .finance-process{font-size:10px}.budget-wizard .form-grid{grid-template-columns:1fr}}
