@@ -1,6 +1,6 @@
 // Planning inputs transcribed from user's 2026–27 proposed budget template.
 // All values are DRAFT planning values, not actual expenses or cash movements.
-export const TEMPLATE_META={year:'2026-27',members:41,registeredAdults:10,annualDues:105,beginningCashAssumption:2500,fundraisingProceedsTarget:3000,commissionRate:0.35};
+export const TEMPLATE_META={year:'2026-27',members:41,registeredAdults:10,annualDues:105,beginningCashAssumption:null,fundraisingProceedsTarget:0,commissionRate:0.35,donationsTarget:0};
 export const TEMPLATE_ROWS=[
  ['Insurance & Fees','Adult registration fees',800,'expense'],
  ['Insurance & Fees','Unit charter fee',100,'expense'],
@@ -25,7 +25,7 @@ export const TEMPLATE_ROWS=[
  ['Administration','Scholarships / reserve fund',205,'expense'],
  ['Administration','Contingency',205,'expense'],
  ['Pack Dues','41 Scouts × $105 annual dues',4305,'income'],
- ['Popcorn Fundraising','Proceeds target at 35% commission',3000,'income'],
+ ['Donations','Optional VFW / community donations (not assumed)',0,'income'],
 ].map(([category,detail,planned,type])=>({category,detail,planned,type,year:'2026-27',note:'DRAFT from uploaded Budget Planner template; verify before approval.'}));
 export const templateTotals=()=>({expenses:TEMPLATE_ROWS.filter(r=>r.type==='expense').reduce((a,b)=>a+b.planned,0),income:TEMPLATE_ROWS.filter(r=>r.type==='income').reduce((a,b)=>a+b.planned,0)});
 export function fundraisingTarget(proceeds,commission,members){
