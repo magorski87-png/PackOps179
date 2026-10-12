@@ -309,6 +309,25 @@ function equipment(){
  <p class="meta">Search updates as you type, ranking word beginnings before other matches. CSV opens in Excel or Google Sheets. Inventory records remain editable and are not modified by export.</p></section>
  ${rows.length?`<div class="cards">${rows.map(r=>`<article class="event-card"><div class="row-between"><h3>${esc(r.name)}</h3><span class="pill ${r.condition==='repair'?'danger':r.condition==='ready'?'success':'warning'}">${r.condition==='repair'?'Repair':r.condition==='ready'?'Ready':'Verify'}</span></div><div class="row-between"><span class="pill info">${esc(r.category)}</span><strong>Qty ${r.quantity}</strong></div><div class="small-info">📍 ${esc(r.location||'Location not specified')}</div><div class="small-info">${r.holder?'👤 With '+esc(r.holder):'No current holder specified'}</div>${r.verifiedAt?`<div class="meta">Last verified ${esc(r.verifiedAt)}</div>`:''}${r.notes?`<p>${esc(r.notes)}</p>`:''}<div class="row wrap">${btn('Edit','equipment-edit','btn btn-outline btn-small',`data-id="${esc(r.id)}"`)}${btn('Change status','equipment-status','btn btn-outline btn-small',`data-id="${esc(r.id)}"`)}${btn('Remove','delete-equipment','btn btn-danger btn-small',`data-id="${esc(r.id)}"`)}</div></article>`).join('')}</div>`:dbState.equipment.length?empty('🔍','No matches','Change your search or category to find equipment.'):empty('🎒','Inventory starts here','Add the rocket kit, Pack flags, tents and camp equipment.',btn('+ Add first item','show-equipment','btn'))}`;
 }
+function families(){
+ const state=cloudState();
+ const denChoices=state.member?.role==='den_leader'?(state.member.den_scopes||[]):DEN_NAMES;
+ return familyManagerView({forms:ui.familyForms,responses:ui.familyResults,activeId:ui.familyActive,
+ lastLink:ui.familyLink,query:ui.familySearch,events:dbState.events,denChoices,cloudReady:cloudActive(),
+ esc,btn,field,select,intro,note,money});
+}
+function familyPublicPage(){
+ if(ui.familySent)return `${intro('Response received','Thank you!','Your RSVP or poll answer was saved securely.')}${note('You can reuse the private invitation link to update your response later.')}`;
+ if(ui.cloudError)return `${intro('Pack 179','Invitation unavailable','Please use the original private invitation link, or contact your den leader.')}${note(esc(ui.cloudError),true)}`;
+ return familyPublicPanel(ui.familyData,{field,select,esc});
+}
+function denWorkspace(){
+ const role=cloudState().member;
+ const allowed=role?.role==='den_leader'?(role.den_scopes||[]):DEN_NAMES;
+ const selected=allowed.includes(ui.denChoice)?ui.denChoice:allowed[0]||'';
+ ui.denChoice=selected;
+ return denWorkspaceView({state:dbState,den:selected,allowed,esc,btn,field,select,textarea,intro,note});
+}
 function assistant(){
  const s=summary(dbState.tasks);const issue=[...s.overdue,...s.unassigned.filter(x=>!s.overdue.includes(x)),...s.dueSoon.filter(x=>!s.overdue.includes(x)&&!s.unassigned.includes(x))].slice(0,12);
  return `${intro('A clearer next move','Cubmaster Assistant','Priorities based on the actual tasks you entered in PackOps—not imagined Scoutbook information.',btn('Copy working brief','copy-brief','btn'))}
@@ -324,7 +343,9 @@ function library(){
  <div class="library-grid">${all.map(item=>`<div class="link-tile"><span class="link-icon">${item.emoji}</span><div style="flex:1;min-width:0"><strong>${esc(item.label)}</strong><small>${esc(item.description||'')}</small><div class="task-options">${link(item.url,'Open','btn btn-small')}${item.fixed?'':btn('Remove','delete-bookmark','btn btn-ghost btn-small',`data-id="${item.id}"`)}</div></div></div>`).join('')}</div>`;
 }
 function settingsPage(){
- return `${intro('Your device and Drive','Settings','Local privacy controls and optional, user-authorized Google Drive receipt uploads.')}
+ const panel=cloudSettingsPanel({state:cloudState(),configured:cloudSettings(),setupError:ui.cloudError,members:ui.cloudMembers,invites:ui.cloudInvites,esc,btn,field,select,note});
+ if(cloudConfigured()&&!cloudActive())return `${intro('Private Pack data','Security & Google login','Sign in with an approved Pack Google account to access PackOps.')}${panel}`;
+ return `${panel}${intro('Your device and Drive','Settings','Local privacy controls and optional, user-authorized Google Drive receipt uploads.')}
  <div class="split"><section class="panel stack"><h2>Connect Google services</h2><p>For receipt uploads, enable Drive API and Picker API. For upcoming events, enable Google Calendar API and grant calendar.readonly access. Use a Google OAuth Web Client ID authorized for your PackOps website. Tokens stay in memory; never enter client secrets.</p><p>Calendar connection status: <strong>${calendarConnected()?'Authorized for this session':'Not connected'}</strong>. Open Pack Calendar to select a calendar.</p>
  <form data-form="google-settings" class="stack">${field('Google OAuth web client ID','googleClientId','text',settings('googleClientId'),'placeholder="12345-abcdef.apps.googleusercontent.com" autocomplete="off"')}${field('Google Picker API key','googleApiKey','text',settings('googleApiKey'),'placeholder="AIza..." autocomplete="off"')}<button class="btn" type="submit">Save configuration on this device</button></form>
  <p class="meta">OAuth Client ID: <strong>${settings('googleClientId')?'Saved on this device':'NOT SAVED'}</strong> · Picker API key: <strong>${settings('googleApiKey')?'Saved on this device':'Not saved'}</strong></p>
