@@ -28,7 +28,7 @@ export async function authorize(clientId){
 }
 export function disconnect(){token='';expiresAt=0}
 export function connected(){return Boolean(token&&Date.now()<expiresAt-60000)}
-export async function selectFolder(apiKey,clientId){
+export async function selectFolder(apiKey,clientId,title='Choose the Pack receipts folder (2026–27)'){
  if(!apiKey?.trim())throw Error('Enter your Google Picker API key in Settings first.');
  const accessToken=await authorize(clientId);
  await loadScript('https://apis.google.com/js/api.js',()=>Boolean(window.gapi));
@@ -37,7 +37,7 @@ export async function selectFolder(apiKey,clientId){
   const pickerApi=window.google.picker;
   const view=new pickerApi.DocsView(pickerApi.ViewId.FOLDERS).setIncludeFolders(true).setSelectFolderEnabled(true);
   const picker=new pickerApi.PickerBuilder().addView(view).setOAuthToken(accessToken).setDeveloperKey(apiKey.trim())
-   .setTitle('Choose the Pack receipts folder (2026–27)')
+   .setTitle(title)
    .setCallback(data=>{
     if(data.action===pickerApi.Action.PICKED){const doc=data.docs?.[0];if(!doc?.id){reject(Error('No folder selected'));return;}resolve({id:doc.id,name:doc.name||doc.id});}
     if(data.action===pickerApi.Action.CANCEL)reject(Error('Folder selection cancelled'));
@@ -62,5 +62,24 @@ export async function uploadReceipt(record,folderId,clientId){
  const result=await response.json().catch(()=>({}));
  if(!response.ok)throw Error(result.error?.message||`Google Drive upload failed (${response.status})`);
  if(!result.id)throw Error('Google Drive did not return a file ID');
+ return result;
+}
+
+export async function uploadEncryptedBackup(backup,folderId,clientId){
+ if(!folderId)throw Error('Select your restricted PackOps Backup folder first');
+ const accessToken=await authorize(clientId);
+ const boundary='packops'+crypto.randomUUID().replaceAll('-','');
+ const metadata={name:backup.fileName,parents:[folderId],description:'Encrypted PackOps restore point. Passphrase required; no plaintext Scout records.'};
+ const body=new Blob([
+  `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
+  `--${boundary}\r\nContent-Type: application/json\r\n\r\n`,
+  backup.blob,
+  `\r\n--${boundary}--`
+ ]);
+ const response=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',{
+  method:'POST',headers:{Authorization:`Bearer ${accessToken}`,'Content-Type':`multipart/related; boundary=${boundary}`},body
+ });
+ const result=await response.json().catch(()=>({}));
+ if(!response.ok||!result.id)throw Error(result.error?.message||'Encrypted backup upload failed');
  return result;
 }
