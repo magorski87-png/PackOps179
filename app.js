@@ -19,6 +19,7 @@ import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin
 import {cloudSettingsPanel} from './cloud-panel.js';
 import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
 import {familyResponseCsv} from './family-ui.js';
+import {reconcileRoster} from './roster-sync.js';
 
 const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
@@ -618,7 +619,15 @@ async function handleAction(action,trigger){
   case 'print':window.print();return;
   case 'copy-brief':await navigator.clipboard.writeText(brief(dbState.tasks,upcomingRecords()));notify('Working briefing copied');return;
   case 'clear-roster':if(askDelete('Remove the entire imported roster from this browser?')){for(const r of dbState.roster)await remove('roster',r.id);ui.rosterPreview=null;ui.rosterSelected.clear();await refresh()}return;
-  case 'commit-roster':if(!ui.rosterPreview)return; if(!askDelete(`Replace the local roster with ${ui.rosterPreview.records.length} entries? Flagged records will remain flagged for review.`))return;for(const r of dbState.roster)await remove('roster',r.id);for(const r of ui.rosterPreview.records)await put('roster',r);ui.rosterPreview=null;ui.rosterSelected.clear();await refresh();notify('Local roster imported; official Scoutbook roster unchanged');return;
+  case 'commit-roster':{
+   if(!ui.rosterPreview)return;
+   const review=reconcileRoster(dbState.roster,ui.rosterPreview.records);
+   if(!askDelete('Import '+ui.rosterPreview.records.length+' Scoutbook rows?\n'+review.matched+' matched existing records (IDs preserved)\n'+review.added+' new rows\n'+review.missing+' missing from the latest export (FLAGGED, not deleted)\n\nThe official Scoutbook roster remains unchanged. Cloud uploads require your approved Pack Google login.'))return;
+   // Existing Scout rows stay put until replacements have been written successfully.
+   for(const row of review.rows)await put('roster',row);
+   ui.rosterPreview=null;ui.rosterSelected.clear();await refresh();
+   notify('Roster updated. '+review.missing+' old records flagged for review; none automatically deleted.');return;
+  }
   case 'open-attachment':{const r=dbState.attachments.find(r=>r.id===id);if(r?.blob)openBlob(r.blob);return;}
   case 'open-receipt':{const r=dbState.receipts.find(r=>r.id===id);if(r?.blob)openBlob(r.blob);return;}
   case 'delete-receipt':if(askDelete('Remove this receipt from the LOCAL queue? Any uploaded Drive file will remain in Google Drive.')){await remove('receipts',id);await refresh()}return;
