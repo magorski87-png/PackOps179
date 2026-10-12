@@ -10,7 +10,7 @@ import {parseLedgerCsv,parseScoutCreditsCsv,financialSnapshot,reimbursePaidAllow
 import {fetchScoutCreditSnapshot} from './finance-google.js';
 import {TEMPLATE_ROWS,TEMPLATE_META} from './finance-template.js';
 import {wizardSeedExpenses,validateWizardSettings,wizardPreview,wizardBudgetLines} from './budget-wizard.js';
-import {currentScoutYear,duesForYear,scoutAccountYear,creditDifference,validScoutYear} from './pack-config.js';
+import {currentScoutYear,duesForYear,scoutAccountYear,creditDifference,validScoutYear,googleSheetIdFromUrl,officialFileUrl} from './pack-config.js';
 import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from './settings-actions.js';
 
 const root=document.getElementById('root');
@@ -246,7 +246,16 @@ function settingsPage(){
  ${field('Annual Pack dues per Scout ($)','dues','number',annualDues()===null?'':String(annualDues()),'step="0.01" min="0" max="10000" required')}
  <div class="field"><label> </label><button class="btn" type="submit">Save Scout-year settings</button></div></form>
  <p class="meta">Current planning year: ${esc(activeYear())} · Official credit records are unchanged.</p></section>
- <section class="panel stack" style="margin-top:20px"><h2>Encrypted Backup & Rebuild</h2>
+ <section class="panel stack" style="margin-top:20px"><h2>Authoritative Google Drive sources</h2>
+ <p>Configure original financial documents separately for each Scout year. These are private Drive links and read-only sources, not files stored in the public PackOps repository.</p>
+ <form data-form="drive-year-sources" class="stack">
+ ${field('Official Scout credit Google Sheet','creditUrl','url',settings('financeCreditsUrl:'+activeYear())||(activeYear()==='2026-27'?LINKS.scoutCredits:''))}
+ ${field('Treasurer ledger workbook','ledgerUrl','url',settings('financeLedgerUrl:'+activeYear())||(activeYear()==='2026-27'?LINKS.ledger:''))}
+ ${field('Approved budget / planning document (optional)','budgetUrl','url',settings('financeBudgetUrl:'+activeYear()))}
+ ${field('Restricted receipt folder (optional)','receiptsUrl','url',settings('financeReceiptsUrl:'+activeYear())||(activeYear()==='2026-27'?LINKS.receipts2026:''))}
+ <button class="btn" type="submit">Save Drive sources for ${esc(activeYear())}</button></form>
+ <p class="meta">Authorized native Scout credit Sheets can refresh read-only. For Excel treasurer ledgers, use the CSV import until workbook synchronization is implemented.</p></section>
+  <section class="panel stack" style="margin-top:20px"><h2>Encrypted Backup & Rebuild</h2>
  <p>Rebuild PackOps on a new phone or computer by importing one encrypted backup containing all local events, tasks, budgets, Scout account snapshots, reimbursements, categories, and receipts. Google authorization must be reconnected on the new device.</p>
  <div class="privacy-strip">Backups contain sensitive Scout and financial records. Use a strong passphrase (12+ characters), never share it with the backup file, and choose a RESTRICTED Drive folder. If the passphrase is lost, the backup cannot be recovered.</div>
  <form data-form="backup-export" class="stack">
@@ -324,7 +333,9 @@ async function handleAction(action,trigger){
   case 'finance-fetch-accounts':{
    if(!window.confirm('Scout credit information is sensitive. Continue ONLY on your private, trusted device? This version stores the imported snapshot locally without centrally enforced roles.'))return;
    trigger.disabled=true;trigger.textContent='Reading authorized Sheet…';
-   const result=await fetchScoutCreditSnapshot(settings('googleClientId'));
+   const sourceUrl=settings('financeCreditsUrl:'+activeYear())||(activeYear()==='2026-27'?LINKS.scoutCredits:'');
+   if(!sourceUrl)throw Error('Configure the Scout credit Google Sheet for '+activeYear()+' in Settings first');
+   const result=await fetchScoutCreditSnapshot(settings('googleClientId'),googleSheetIdFromUrl(sourceUrl),activeYear());
    const dues=annualDues();if(dues===null)throw Error('Set annual dues for '+activeYear()+' in Settings first');
    const parsed=parseScoutCreditsCsv(result.csv,dues);
    if(!window.confirm(`Refresh ${parsed.scouts.length} Scout credit records on this device? Previous local snapshot will be replaced. The original Google Sheet will not change.`))return;
@@ -364,7 +375,9 @@ async function handleAction(action,trigger){
    await put('financeReimbursements',{...matched,status:'paid',paidAt:now(),updatedAt:now()});await refresh();notify('Payment matched to local copy of the official ledger');return;
   }
   case 'finance-export-report':{
-   const s=financialSnapshot({budget:dbState.budget,ledger:dbState.financeLedger,tags:dbState.financeTags,reimbursements:dbState.financeReimbursements});
+   const year=activeYear(),ledger=dbState.financeLedger.filter(x=>scoutAccountYear(x)===year);
+   const tags=dbState.financeTags.filter(x=>ledger.some(row=>row.id===x.id));
+   const s=financialSnapshot({budget:dbState.budget.filter(x=>(x.year||'2026-27')===year),ledger,tags,reimbursements:dbState.financeReimbursements.filter(x=>scoutAccountYear(x)===year)});
    downloadCsv(csvExport(reportsRows(s),['Category','Planned','Actual','Variance']),`Pack179_Committee_Budget_${isoToday()}.csv`);notify('Committee category-only report exported');return;
   }
   case 'finance-print-report':window.print();return;
@@ -464,6 +477,15 @@ function openBlob(blob){const url=URL.createObjectURL(blob);const opened=window.
 async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
+  case 'drive-year-sources':{
+   const year=activeYear(),credit=f('creditUrl'),ledger=f('ledgerUrl'),budgetUrl=f('budgetUrl'),receipts=f('receiptsUrl');
+   if(credit)googleSheetIdFromUrl(credit);
+   const rows=[['financeCreditsUrl:'+year,credit?officialFileUrl(credit):''],['financeLedgerUrl:'+year,ledger?officialFileUrl(ledger):''],
+    ['financeBudgetUrl:'+year,budgetUrl?officialFileUrl(budgetUrl):''],['financeReceiptsUrl:'+year,receipts?officialFileUrl(receipts):'']];
+   if(!askDelete('Update '+year+' Google Drive source links on this device? Original Google files will not be changed.'))return;
+   for(const [key,value] of rows)await writeSetting(key,value);
+   await refresh();notify('Official Drive source links saved for '+year);return;
+  }
   case 'pack-year-config':if(await saveYearConfiguration(form,dbState.financeAccounts)){await refresh();notify('Annual Pack dues saved for '+activeYear())}return;
   case 'backup-export':{const message=await exportPackOpsBackup(form,settings);if(message)notify(message);return;}
   case 'backup-restore':if(await restorePackOpsFromFile(form)){ui.rosterSelected.clear();ui.googleEvents=[];ui.calendarFetchedAt=0;await refresh();notify('PackOps restored. Reconnect Google services.')}return;
@@ -528,7 +550,7 @@ async function handleForm(form){
    const rows=parseLedgerCsv(await file.text());
    if(!askDelete(`Replace local treasurer ledger snapshot with ${rows.length} rows? The original Drive workbook is never edited.`))return;
    for(const row of dbState.financeLedger.filter(r=>scoutAccountYear(r)===activeYear()))await remove('financeLedger',row.id);
-   for(const row of rows)await put('financeLedger',{...row,sourceYear:activeYear()});
+   for(const row of rows)await put('financeLedger',{...row,id:activeYear()==='2026-27'?row.id:activeYear()+':'+row.id,sourceYear:activeYear()});
    await writeSetting('financeLedgerImportedAt',new Date().toISOString());
    await refresh();notify(`${rows.length} treasurer ledger entries imported read-only`);return;
   }
