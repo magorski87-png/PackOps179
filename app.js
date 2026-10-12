@@ -318,8 +318,8 @@ async function handleAction(action,trigger){
    const audit={id:makeId(),type:'budget-revision',year:activeYear(),createdAt:stamp,source:'Budget Wizard',previous:previous.map(x=>({...x})),next:draft.map(x=>({...x})),summary:{expenses:preview.totalExpense,income:preview.income,dues:preview.dues}};
    const year=activeYear(),settingsUpdates=[
     {key:'financeDues:'+year,value:String(preview.dues)},
-    {key:'financeFundraisingTarget:'+year,value:String(preview.fundraising)},
-    {key:'financeFundraisingCommission:'+year,value:String(preview.commission)},
+    {key:'financeFundraisingTarget:'+year,value:'0'},
+    {key:'financeDonationEstimate:'+year,value:String(preview.donations)},
     {key:'financeFundraisingScouts:'+year,value:String(preview.scouts)},
     {key:'financeBudgetDraftUpdated:'+year,value:new Date(stamp).toISOString()}
    ];
@@ -336,9 +336,9 @@ async function handleAction(action,trigger){
    if(!askDelete('Create 24 DRAFT budget lines from your uploaded 2026–27 template? This will NOT alter the treasurer ledger or officially approve a budget.'))return;
    for(const line of TEMPLATE_ROWS)await put('budget',{...line,id:makeId(),createdAt:now()});
    if(settings('financeDues:'+activeYear())==='')await writeSetting('financeDues:'+activeYear(),String(TEMPLATE_META.annualDues));
-   await writeSetting('financeFundraisingTarget',String(TEMPLATE_META.fundraisingProceedsTarget));
-   await writeSetting('financeFundraisingCommission',String(TEMPLATE_META.commissionRate));
-   await writeSetting('financeFundraisingScouts',String(TEMPLATE_META.members));
+   await writeSetting('financeFundraisingTarget:'+activeYear(),'0');
+   await writeSetting('financeDonationEstimate:'+activeYear(),'0');
+   await writeSetting('financeFundraisingScouts:'+activeYear(),String(TEMPLATE_META.members));
    await writeSetting('financeTemplateSource','Budget Planner.xlsx – proposed 2026–27 budget');
    await refresh();notify('Imported template planning lines as unapproved drafts');return;
   }
@@ -540,7 +540,7 @@ async function handleForm(form){
    ui.wizardSource=source;ui.wizardStep=1;render();return;
   }
   case 'wizard-assumptions':{
-   const config={year:activeYear(),scouts:Number(f('scouts')),adults:Number(f('adults')),dues:f('dues'),fundraising:f('fundraising'),commission:f('commission')};
+   const config={year:activeYear(),scouts:Number(f('scouts')),adults:Number(f('adults')),dues:f('dues'),donations:f('donations')};
    validateWizardSettings(config);
    const prevYear=(Number(activeYear().slice(0,4))-1)+'-'+activeYear().slice(2,4);
    ui.wizardExpenses=wizardSeedExpenses({source:ui.wizardSource,scouts:config.scouts,adults:config.adults,
