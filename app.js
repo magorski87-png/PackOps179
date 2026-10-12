@@ -9,7 +9,7 @@ import {parseLedgerCsv,parseScoutCreditsCsv,financialSnapshot,reimbursePaidAllow
 import {fetchScoutCreditSnapshot} from './finance-google.js';
 import {TEMPLATE_ROWS,TEMPLATE_META} from './finance-template.js';
 import {currentScoutYear,duesForYear,scoutAccountYear,creditDifference,validScoutYear} from './pack-config.js';
-import {createEncryptedBackup,readEncryptedBackup,restoreBackup} from './backup.js';
+import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from './settings-actions.js';
 
 const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
@@ -401,6 +401,9 @@ function openBlob(blob){const url=URL.createObjectURL(blob);const opened=window.
 async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
+  case 'pack-year-config':if(await saveYearConfiguration(form,dbState.financeAccounts)){await refresh();notify('Annual Pack dues saved for '+activeYear())}return;
+  case 'backup-export':{const message=await exportPackOpsBackup(form,settings);if(message)notify(message);return;}
+  case 'backup-restore':if(await restorePackOpsFromFile(form)){ui.rosterSelected.clear();ui.googleEvents=[];ui.calendarFetchedAt=0;await refresh();notify('PackOps restored. Reconnect Google services.')}return;
   case 'finance-budget':{
    const v=Number(f('planned'));if(!Number.isFinite(v)||v<0||v>1e9)throw Error('Enter a valid planning amount');
    await put('budget',{id:makeId(),category:f('category'),type:f('type'),planned:Math.round(v*100)/100,eventId:f('eventId'),year:f('year'),note:f('note'),createdAt:now()});ui.financeForm='';break;
