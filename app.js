@@ -30,9 +30,27 @@ const now=()=>Date.now();
 const cloudActive=()=>Boolean(cloudState().member);
 const cloudSettings=()=>({projectUrl:settings('supabaseUrl')||PACK_CLOUD_CONFIG.projectUrl,publishableKey:settings('supabasePublishableKey')||PACK_CLOUD_CONFIG.publishableKey,packId:settings('supabasePackId')||PACK_CLOUD_CONFIG.packId});
 const cloudConfigured=()=>Boolean(cloudSettings().projectUrl);
-async function put(table,row){return cloudActive()&&sharedTable(table)?saveCloudRow(table,row):localPut(table,row)}
-async function remove(table,id){return cloudActive()&&sharedTable(table)?deleteCloudRow(table,id):localRemove(table,id)}
-const list=table=>cloudActive()&&sharedTable(table)?fetchCloudRows(table):localList(table);
+async function put(table,row){
+ if(table==='receipts'){
+  await localPut(table,row);
+  if(cloudActive()&&row.driveFileId){const {blob,...metadata}=row;await saveCloudRow(table,metadata)}
+  return;
+ }
+ return cloudActive()&&sharedTable(table)?saveCloudRow(table,row):localPut(table,row);
+}
+async function remove(table,id){
+ if(table==='receipts'){const row=dbState.receipts.find(r=>r.id===id);if(cloudActive()&&row?.driveFileId)await deleteCloudRow(table,id);return localRemove(table,id)}
+ return cloudActive()&&sharedTable(table)?deleteCloudRow(table,id):localRemove(table,id)
+}
+const list=async table=>{
+ if(table==='receipts'&&cloudActive()){
+  const [remote,local]=await Promise.all([fetchCloudRows(table),localList(table)]);
+  const merged=new Map(remote.map(r=>[r.id,r]));
+  for(const row of local)if(row.blob||!merged.has(row.id))merged.set(row.id,row);
+  return [...merged.values()];
+ }
+ return cloudActive()&&sharedTable(table)?fetchCloudRows(table):localList(table);
+};
 async function replaceAnnualBudget(payload){
  if(!cloudActive())return localReplaceAnnualBudget(payload);
  // Cloud writes are separately protected operations; never claim cross-record atomicity.
@@ -636,7 +654,14 @@ async function handleAction(action,trigger){
    const folder=settings('googleFolder'),client=settings('googleClientId');
    if(!folder||!client){notify('Configure Google Drive and choose the receipts folder first',true);route('settings');return;}
    trigger.disabled=true;trigger.textContent='Uploading…';
-   try{const uploaded=await uploadReceipt(r,folder,client);await put('receipts',{...r,state:'uploaded',driveFileId:uploaded.id,error:'',uploadedAt:now()});await refresh();notify('Receipt uploaded to Google Drive');}
+   try{
+    const uploaded=await uploadReceipt(r,folder,client);
+    const updated={...r,state:'uploaded',driveFileId:uploaded.id,error:'',uploadedAt:now()};
+    await localPut('receipts',updated);
+    let syncWarning='';
+    if(cloudActive()){try{const {blob,...metadata}=updated;await saveCloudRow('receipts',metadata)}catch(e){syncWarning=e.message}}
+    await refresh();notify(syncWarning?'Uploaded to Drive, but shared receipt index needs retry: '+syncWarning:'Receipt uploaded to Google Drive and indexed for authorized Pack finance');
+   }
    catch(error){await put('receipts',{...r,state:'error',error:String(error.message||error)});await refresh();notify('Upload failed: '+error.message,true)}return;
   }
   case 'google-sign-in':try{
