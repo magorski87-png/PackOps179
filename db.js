@@ -54,6 +54,24 @@ export async function replaceAllTables(snapshot){
   }catch(error){tx.abort();reject(error);}
  });
 }
+// One transaction for a reviewed draft replacement, dues settings, and audit snapshot.
+export async function replaceAnnualBudget({existing=[],draft=[],audit,settings=[]}){
+ const db=await openDb();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction(['budget','settings','financeAudit'],'readwrite');
+  tx.oncomplete=()=>resolve();
+  tx.onerror=()=>reject(tx.error||new Error('Budget could not be saved'));
+  tx.onabort=()=>reject(tx.error||new Error('Budget update cancelled; no replacement committed'));
+  try{
+   const budget=tx.objectStore('budget');
+   for(const row of existing)budget.delete(row.id);
+   for(const row of draft)budget.put(row);
+   tx.objectStore('financeAudit').put(audit);
+   const opts=tx.objectStore('settings');
+   for(const row of settings)opts.put(row);
+  }catch(error){tx.abort();reject(error)}
+ });
+}
 export async function clearEverything(){
   const db=await openDb();db.close();instancePromise=undefined;
   await new Promise((resolve,reject)=>{const req=indexedDB.deleteDatabase(DB_NAME);req.onsuccess=resolve;req.onerror=()=>reject(req.error);req.onblocked=()=>reject(new Error('Close other PackOps tabs before clearing data'))});
