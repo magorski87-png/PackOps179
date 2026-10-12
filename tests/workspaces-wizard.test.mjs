@@ -25,15 +25,15 @@ test('Calendar conversion uses selected calendar ID and start/end details',()=>{
  assert.equal(e.endTime,'2027-03-02T20:00:00-05:00');
  assert.equal(e.description,'Meet at gym');
 });
-test('Wizard scales expenses by headcount and keeps dues/fundraising projections distinct',()=>{
+test('Wizard scales expenses by headcount and uses dues and optional donations without Pack popcorn income',()=>{
  const expenses=wizardSeedExpenses({source:'template',scouts:41,adults:10});
- const config={year:'2026-27',scouts:41,adults:10,dues:'105',fundraising:'3000',commission:'35'};
+ const config={year:'2026-27',scouts:41,adults:10,dues:'105',donations:'0'};
  const p=wizardPreview(config,expenses);
  assert.equal(p.projectedDues,4305);
- assert.equal(p.grossSalesTarget,8571.43);
+ assert.equal(p.income,4305);assert.equal(p.grossSalesTarget,0);
  const rows=wizardBudgetLines(config,expenses);
  assert.equal(rows.filter(x=>x.type==='income').length,2);
- assert.equal(rows.find(x=>x.category==='Pack Dues').planned,4305);
+ assert.equal(rows.find(x=>x.category==='Pack Dues').planned,4305);assert.equal(rows.find(x=>x.category==='Donations').planned,0);assert.equal(rows.some(x=>/popcorn/i.test(x.category)),false);
  assert.equal(rows.some(x=>x.note.includes('DRAFT')),true);
  assert.equal(expenses.find(x=>x.detail==='Adult registration fees').planned,800);
  const scaled=wizardSeedExpenses({source:'template',scouts:82,adults:20});
