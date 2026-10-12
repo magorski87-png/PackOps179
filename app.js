@@ -237,6 +237,7 @@ function eventDetail(e){
  const spent=tags.reduce((n,t)=>n+dbState.financeLedger.filter(x=>x.id===t.id).reduce((z,x)=>z+Number(x.debit||0)-Number(x.credit||0),0),0);
  const requestCount=dbState.financeReimbursements.filter(x=>x.eventId===e.id || (!x.eventId&&x.eventTitle===e.title)).length;
  const receiptCount=dbState.receipts.filter(x=>x.eventId===e.id).length;
+ const equipmentNeeded=(e.equipmentIds||[]).map(id=>dbState.equipment.find(x=>x.id===id)).filter(Boolean);
  return `<div class="row-between no-print" style="margin-bottom:20px">${btn('← All events','back-events','btn btn-ghost')}${btn('Delete event','delete-event','btn btn-danger btn-small',`data-id="${e.id}"`)}</div>
  ${intro('Event workspace',e.title,`${niceDate(e.date)} · ${e.location||'Location not recorded'} · Lead: ${e.owner||'Unassigned'}`)}
  ${e.googleEventId?'<section class="panel stack" style="margin-bottom:18px"><div class="row-between"><strong>↻ Linked to Google Calendar</strong>'+(e.calendarUrl?link(e.calendarUrl,'View original event','btn btn-outline btn-small'):'')+'</div><p class="meta">The title, date and location follow Google Calendar on refresh. Notes, tasks, receipts and budgets stay in PackOps.</p>'+(e.description?'<p>'+esc(e.description)+'</p>':'')+'</section>':''}
@@ -249,6 +250,10 @@ function eventDetail(e){
  ${field('Estimated cost ($)','planned','number','','min="0" step="0.01" required')}
  </div><button class="btn btn-outline" type="submit">Add event budget line</button></form>
  ${allocations.filter(x=>(x.type||'expense')==='expense').length?'<div class="finance-table-wrap"><table class="finance-table"><thead><tr><th>Planned item</th><th>Category</th><th>Amount</th></tr></thead><tbody>'+allocations.filter(x=>(x.type||'expense')==='expense').map(x=>'<tr><td>'+esc(x.detail||x.note||'Event item')+'</td><td>'+esc(x.category)+'</td><td>'+money(x.planned)+'</td></tr>').join('')+'</tbody></table></div>':''}
+ </section><section class="panel stack"><div class="row-between"><h2>Equipment needed</h2>${btn('Family RSVPs / Polls','event-open-families','btn btn-outline btn-small')}</div>
+ <p>Reference existing Pack inventory rather than maintaining a duplicate list. These links are shared with approved leaders once cloud sync is enabled.</p>
+ ${equipmentNeeded.length?equipmentNeeded.map(item=>`<div class="row-between list-item"><div><strong>${esc(item.name)}</strong><div class="meta">${esc(item.category||'General Equipment')} · Qty ${esc(String(item.quantity??1))} · ${esc(item.location||'Location unknown')}</div></div>${btn('Remove','event-remove-equipment','btn btn-danger btn-small',`data-id="${esc(item.id)}"`)} </div>`).join(''):'<p class="meta">No inventory items linked to this event.</p>'}
+ <form data-form="event-equipment" data-id="${esc(e.id)}" class="row wrap">${select('Add from inventory','equipmentId',dbState.equipment.map(item=>[item.id,item.name+' · '+(item.location||'Location unknown')]))}<button class="btn btn-small" type="submit" ${dbState.equipment.length?'':'disabled'}>Add equipment</button></form>
  </section><section class="panel"><h2>Event attachments</h2><p>Attach photos, PDFs, route maps or reference documents. These are stored locally in this first version.</p><form data-form="attachment" data-id="${e.id}"><div class="field"><input type="file" name="file" class="input" required aria-label="Event attachment" accept="image/*,application/pdf,.doc,.docx,.xlsx,.csv,.txt"></div><div class="form-actions"><button class="btn btn-small" type="submit">Attach file</button></div></form>${att.length?att.map(a=>`<div class="list-item"><div class="row-between"><strong style="font-size:12px;overflow-wrap:anywhere">📎 ${esc(a.fileName)}</strong><div class="row">${btn('Open','open-attachment','btn btn-ghost btn-small',`data-id="${a.id}"`)}${btn('×','delete-attachment','btn btn-danger btn-small',`data-id="${a.id}"`)}</div></div></div>`).join(''):`<p class="muted">No files attached yet.</p>`}</section>
  <section class="panel stack"><h3>Official event</h3><p>Set the official calendar entry and RSVP through Scoutbook Plus. Paste its link into your event notes when available.</p>${link(LINKS.scoutbook,'Open Scoutbook Plus','btn btn-outline btn-full')}${link(LINKS.packDrive,'Open Pack Drive','btn btn-ghost btn-full')}</section></div></div>`;
 }
@@ -588,6 +593,12 @@ async function handleAction(action,trigger){
   }
   case 'open-event':route('events',id);return;
   case 'back-events':route('events');return;
+  case 'event-open-families':ui.familyEventFilter=ui.eventId;await loadFamilyForms();route('families');return;
+  case 'event-remove-equipment':{
+   const ev=findEvent(ui.eventId);if(!ev)return;
+   await put('events',{...ev,equipmentIds:(ev.equipmentIds||[]).filter(x=>x!==id)});
+   await refresh();return;
+  }
   case 'event-go-finance':ui.financeTab='builder';route('budget');return;
   case 'event-reimburse':ui.financeTab='reimbursements';ui.reimbursementEventId=ui.eventId;route('budget');return;
   case 'event-receipt':ui.receiptEventId=ui.eventId;route('receipts');return;
@@ -808,6 +819,12 @@ async function handleForm(form){
   case 'event':{
    const e={id:makeId(),title:f('title'),date:f('date'),location:f('location'),owner:f('owner'),notes:f('notes'),links:f('links'),createdAt:now()};
    await put('events',e);ui.form='';await refresh();route('events',e.id);notify('Event workspace saved on this device');return;
+  }
+  case 'event-equipment':{
+   const ev=findEvent(form.dataset.id),id=f('equipmentId');
+   if(!ev||!dbState.equipment.some(r=>r.id===id))throw Error('Choose equipment already in Pack inventory');
+   await put('events',{...ev,equipmentIds:[...new Set([...(ev.equipmentIds||[]),id])],updatedAt:now()});
+   await refresh();notify('Equipment linked to event');return;
   }
   case 'event-notes':{const old=findEvent(form.dataset.id);if(old)await put('events',{...old,notes:f('notes'),links:f('links'),updatedAt:now()});break;}
   case 'attachment':{
