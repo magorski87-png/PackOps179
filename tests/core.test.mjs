@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {csvParse,summary,completion,brief,MEETING,MENU} from '../data.js';
 import {parseRoster} from '../roster-import.js';
 
-test('dashboard has exactly the ten requested sections',()=>{
- assert.equal(MENU.length,10);assert.deepEqual(new Set(MENU.map(x=>x.id)).size,10);
+test('dashboard retains core ten sections plus Den Leader and family response tools',()=>{
+ assert.equal(MENU.length,12);assert.equal(new Set(MENU.map(x=>x.id)).size,12);
 });
 test('meeting script includes essential elements',()=>{
  for(const component of ['flags-open','pledge','recognition','activity','announcements','minute','flags-close'])assert.ok(MEETING.some(x=>x.id===component));
