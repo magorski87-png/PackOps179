@@ -124,3 +124,17 @@ export function watchCloudChanges(callback){
 export async function stopCloudChanges(){
  if(client&&changesChannel){await client.removeChannel(changesChannel);changesChannel=null}
 }
+
+export async function fetchPackSettings(){
+ requireMember();
+ if(!['admin','cubmaster','treasurer'].includes(member.role))return [];
+ const result=await client.from('pack_settings').select('setting_key,setting_value').eq('pack_id',packId);
+ fail(result,'Loading Pack finance settings');
+ return (result.data||[]).map(r=>({key:r.setting_key,value:r.setting_value}));
+}
+export async function savePackSetting(key,value){
+ requireMember();
+ if(!['admin','cubmaster','treasurer'].includes(member.role))throw Error('Only an authorized finance leader can change Pack finance configuration');
+ if(!(key==='activeScoutYear'||key.startsWith('finance')))throw Error('This setting is personal to this device, not shared');
+ fail(await client.from('pack_settings').upsert({pack_id:packId,setting_key:key,setting_value:String(value)},{onConflict:'pack_id,setting_key'}),'Saving Pack finance setting');
+}
