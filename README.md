@@ -1,3 +1,19 @@
+# PackOps 179 · v0.5 Cub Scout Theme & Ledger-Based Finance
+
+**Pack 179 income policy:** Pack operations are primarily supported by annual dues. A VFW or another community organization may make occasional donations, but the budget assumes **$0 donations** until explicitly planned. The Pack currently receives **$0 operating fundraising income from popcorn sales**. Scout popcorn earnings belong in individual Scout-credit accounting, not Pack revenue.
+
+## What's new
+
+- **Cub Scouts colors:** The interface uses blue **#003F87** and yellow **#FCD116**, with higher-contrast typography and a lighter mobile dashboard. PWA metadata and SVG icon match the theme.
+- **Start Finance with the ledger:** Open **Pack Finance → Overview → Import treasurer ledger CSV**. Export the relevant tab from Courtney's official ledger workbook as CSV in Google Sheets or Excel. The app previews cash deposits, withdrawals and the last listed running balance, highlights balance discrepancies, then asks permission before replacing only that Scout year's **local snapshot**.
+- **Safe cash accounting:** Raw deposits/withdrawals are displayed separately from **classified Pack income and actual expenses**. Transfers, reimbursements, restricted Scout credits, and popcorn proceeds are not automatically recognized as Pack income. Review classification manually under Ledger Review; a user-confirmed suggestion option recognizes obvious annual-dues or VFW-donation descriptions.
+- **Year-specific budget planning:** The Budget Wizard forecasts annual dues and optional VFW/community donations. Popcorn Pack proceeds default to zero, without affecting personal Scout popcorn credits. The legacy $3,000 popcorn-income line in prior budgets is retained for audit but excluded from Pack operating-income totals, with a visible warning to review that obsolete draft.
+- **Backups:** Local budget records and ledger snapshots can be encrypted and recovered using Settings. This is not live multi-user synchronization.
+
+**Current limitation:** The treasurer ledger import accepts **CSV**, not direct XLSX. The original Drive workbook is never edited. For current figures, export and reimport an updated CSV whenever Courtney revises the ledger. The reported balance is the **last balance listed in the imported ledger**, not a direct banking connection. Do not treat unclassified deposits as earned income or a forecast as available cash. Do not place Scout financial records on public GitHub Pages or a shared device.
+
+---
+
 # PackOps 179 · v0.4 Calendar Workspaces & Budget Wizard
 
 This is a mobile-first, installable PWA. Its GitHub Pages code is public. **Never put private Scout or finance data in the GitHub repository.**
