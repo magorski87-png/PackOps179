@@ -66,8 +66,9 @@ export function financialSnapshot({budget=[],ledger=[],tags=[],reimbursements=[]
  const posted=ledger.filter(r=>!r.isOpening);
  const categorized=posted.map(r=>({...r,tag:tagById.get(r.id)}));
  const spent=round(categorized.filter(r=>r.tag?.kind==='expense').reduce((a,r)=>a+Math.max(0,r.debit-r.credit),0));
- const received=round(categorized.filter(r=>r.tag?.kind==='income').reduce((a,r)=>a+Math.max(0,r.credit-r.debit),0));
- const unclassified=categorized.filter(r=>!r.tag?.kind||r.tag.kind==='unclassified');
+ const received=round(categorized.filter(r=>r.tag?.kind==='income'&&!/popcorn/i.test(r.tag.category||'')).reduce((a,r)=>a+Math.max(0,r.credit-r.debit),0));
+  const popcornTagged=categorized.filter(r=>r.tag?.kind==='income'&&/popcorn/i.test(r.tag.category||'')).length;
+ const unclassified=categorized.filter(r=>!r.tag?.kind||r.tag.kind==='unclassified'||(r.tag.kind==='income'&&/popcorn/i.test(r.tag.category||'')));
  const lastBalance=[...ledger].reverse().find(x=>x.balance!==null)?.balance??null;
  const plannedExpenses=round(budget.filter(r=>(r.type||'expense')==='expense').reduce((a,r)=>a+amount(r.planned),0));
  // Older draft budgets might contain an obsolete Pack popcorn-income assumption.
@@ -94,7 +95,7 @@ export function financialSnapshot({budget=[],ledger=[],tags=[],reimbursements=[]
  const baseline=round(settings.restricted||0),reserve=round(settings.reserve||0);
  // Never label this as cash available to spend; source is ledger, commitments need reconciliation.
  const estimatedHeadroom=lastBalance===null?null:round(lastBalance-pending-baseline-reserve);
- return {spent,received,cashDeposits,cashWithdrawals,obsoletePopcornIncome,unclassified:unclassified.length,lastBalance,plannedExpenses,plannedIncome,pending,expenseCats,estimatedHeadroom,reserve,restricted:baseline,ledgerCount:posted.length};
+ return {spent,received,cashDeposits,cashWithdrawals,obsoletePopcornIncome,popcornTagged,unclassified:unclassified.length,lastBalance,plannedExpenses,plannedIncome,pending,expenseCats,estimatedHeadroom,reserve,restricted:baseline,ledgerCount:posted.length};
 }
 export function forecast({startingCash,expectedIncome=0,expectedExpenses=0,reserve=0,restricted=0}){
  if(startingCash===null||!Number.isFinite(Number(startingCash)))return null;
