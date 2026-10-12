@@ -1,6 +1,6 @@
 import {TABLES,list,get,put,remove,readSetting,writeSetting,clearEverything} from './db.js';
 import {LINKS,MENU,MEETING,DEN_NAMES,isoToday,makeId,money,esc,safeUrl,niceDate,summary,completion,csvParse,brief} from './data.js';
-import {authorize,connected,disconnect,selectFolder,uploadReceipt} from './drive.js';
+import {authorize,connected,disconnect,selectFolder,uploadReceipt,uploadEncryptedBackup} from './drive.js';
 import {parseRoster,importPrivacySummary,denGroup,exportRoster,groupScouts,RANKS} from './roster-import.js';
 import {calendarAuthorize,calendarList,calendarUpcoming,disconnectCalendar,calendarConnected} from './calendar-api.js';
 import {parseIcs,uniqueUpcoming} from './calendar-import.js';
@@ -8,6 +8,8 @@ import {financeView} from './finance-ui.js';
 import {parseLedgerCsv,parseScoutCreditsCsv,financialSnapshot,reimbursePaidAllowed,csvExport,reportsRows,amount,EXPENSE_CATEGORIES} from './finance.js';
 import {fetchScoutCreditSnapshot} from './finance-google.js';
 import {TEMPLATE_ROWS,TEMPLATE_META} from './finance-template.js';
+import {currentScoutYear,duesForYear,scoutAccountYear,creditDifference,validScoutYear} from './pack-config.js';
+import {createEncryptedBackup,readEncryptedBackup,restoreBackup} from './backup.js';
 
 const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
@@ -39,6 +41,8 @@ async function refresh(){
  render();
 }
 function settings(key){return dbState.settings.find(s=>s.key===key)?.value||'';}
+function activeYear(){return currentScoutYear(dbState.settings);}
+function annualDues(){return duesForYear(dbState.settings,activeYear());}
 async function saveSetting(key,value){await writeSetting(key,value);await refresh();}
 function route(view='home',event=''){
  ui.page=view;ui.eventId=event;ui.form='';ui.editTask='';
@@ -104,7 +108,7 @@ function calendar(){
  ${link(LINKS.scoutbook,'Open Scoutbook Plus','btn btn-ghost btn-full')}
  <div class="privacy-strip">Best approach: enter official events in Scoutbook and subscribe to its .ics calendar in Google Calendar. Do not duplicate official events in two systems.</div></section></div>`;
 }
-function budget(){return financeView({state:dbState,ui,esc,money,settings,intro,note,btn,link,field,select,textarea,empty,upcoming:upcomingRecords});}
+function budget(){return financeView({state:dbState,ui,esc,money,settings,intro,note,btn,link,field,select,textarea,empty,upcoming:upcomingRecords,year:activeYear(),dues:annualDues()});}
 function budgetForm(){return `<h3>Add planning entry</h3><form data-form="budget" class="stack"><div class="form-grid">${field('Category','category','text','','required maxlength="100"')}${field('Planned amount ($)','planned','number','0','min="0" step="0.01" required')}${field('Entered actual ($)','actual','number','0','min="0" step="0.01" required')}${field('Notes','note')}</div><div class="form-actions"><button class="btn" type="submit">Save entry</button>${btn('Cancel','cancel-form')}</div></form>`}
 function receiptForm(){return `<section class="panel"><h2>Capture a receipt</h2><p>Save a photo or PDF into a local upload queue. Upload to the selected Pack Drive folder when Google access is connected.</p>
  <form data-form="receipt" class="stack"><div class="field"><label for="receiptFile">Receipt image or PDF · 15 MB max</label><input class="input" id="receiptFile" name="file" type="file" accept="image/*,application/pdf" required></div><div class="form-grid">${field('Vendor / store (optional)','vendor')}${field('Amount ($, optional)','amount','number','','min="0" step="0.01"')}${select('Related event','eventId',eventOptions())}${field('Description (optional)','note')}</div><div class="form-actions"><button class="btn" type="submit">🧾 Save receipt to upload queue</button></div></form></section>`}
@@ -209,7 +213,28 @@ function settingsPage(){
  <form data-form="google-settings" class="stack">${field('Google OAuth web client ID','googleClientId','text',settings('googleClientId'))}${field('Google Picker API key','googleApiKey','text',settings('googleApiKey'))}<button class="btn" type="submit">Save configuration on this device</button></form>
  <p>Status: <strong>${connected()?'Authorized for this session':'Not connected'}</strong></p>${btn('Sign in to Google','google-sign-in','btn btn-full')}${btn('Choose 2026–27 receipts destination','google-pick-folder','btn btn-outline btn-full')}${settings('googleFolder')?`<p class="setting-kv">Chosen destination: ${esc(settings('googleFolderName'))} (${esc(settings('googleFolder'))})</p>`:''}${btn('Disconnect','google-disconnect','btn btn-ghost btn-full')}
  <div class="privacy-strip">You must explicitly authorize the app and select the proper destination folder. The Drive API only uploads receipts when you click Upload. There is no background access to roster files or finances.</div></section>
- <section class="panel stack"><h2>Data & privacy</h2><p>This version saves event plans, roster copies, budgets, Scout credit snapshots, reimbursement proposals, volunteer tasks, and receipts in this browser's IndexedDB. Clearing browser storage removes local data. Different devices do not yet synchronize these records.</p><p>Never import private youth records onto shared or public devices. This version has no server-based role permissions.</p>${btn('Clear all local working data','clear-local','btn btn-danger btn-full')}${link(LINKS.packDrive,'Open authorized Pack Drive','btn btn-outline btn-full')}</section></div>`;
+ <section class="panel stack"><h2>Data & privacy</h2><p>This version saves event plans, roster copies, budgets, Scout credit snapshots, reimbursement proposals, volunteer tasks, and receipts in this browser's IndexedDB. Clearing browser storage removes local data. Different devices do not yet synchronize these records.</p><p>Never import private youth records onto shared or public devices. This version has no server-based role permissions.</p>${btn('Clear all local working data','clear-local','btn btn-danger btn-full')}${link(LINKS.packDrive,'Open authorized Pack Drive','btn btn-outline btn-full')}</section></div>
+ <section class="panel stack" style="margin-top:20px"><h2>Scout year & Pack dues</h2>
+ <p>Configure annual dues separately for every Scout year. Updating dues changes local forecasts and discrepancy checks, but NEVER rewrites Courtney's official Google Sheets formulas or financial records.</p>
+ <form data-form="pack-year-config" class="form-grid">
+ ${field('Scout year (e.g. 2026-27)','year','text',activeYear(),'pattern="20[0-9]{2}-[0-9]{2}" required')}
+ ${field('Annual Pack dues per Scout ($)','dues','number',annualDues()===null?'':String(annualDues()),'step="0.01" min="0" max="10000" required')}
+ <div class="field"><label> </label><button class="btn" type="submit">Save Scout-year settings</button></div></form>
+ <p class="meta">Current planning year: ${esc(activeYear())} · Official credit records are unchanged.</p></section>
+ <section class="panel stack" style="margin-top:20px"><h2>Encrypted Backup & Rebuild</h2>
+ <p>Rebuild PackOps on a new phone or computer by importing one encrypted backup containing all local events, tasks, budgets, Scout account snapshots, reimbursements, categories, and receipts. Google authorization must be reconnected on the new device.</p>
+ <div class="privacy-strip">Backups contain sensitive Scout and financial records. Use a strong passphrase (12+ characters), never share it with the backup file, and choose a RESTRICTED Drive folder. If the passphrase is lost, the backup cannot be recovered.</div>
+ <form data-form="backup-export" class="stack">
+ ${field('Backup passphrase','passphrase','password','','minlength="12" autocomplete="new-password" required')}
+ ${select('Save backup to','destination',[['download','Download encrypted backup'],['drive','Upload encrypted backup to Drive']],'download')}
+ <button class="btn" type="submit">Create encrypted backup</button></form>
+ ${btn('Choose restricted Drive backup folder','google-pick-backup-folder','btn btn-outline')}
+ ${settings('googleBackupFolder')?'<p class="meta">Backup folder: '+esc(settings('googleBackupFolderName')||settings('googleBackupFolder'))+'</p>':''}
+ <div class="divider"></div><h3>Restore PackOps from a backup</h3>
+ <p>Download the encrypted file from Drive if needed, then select it here. Restoring replaces ALL local PackOps data on this device after confirmation, and does not modify the original Google files.</p>
+ <form data-form="backup-restore" class="stack"><input class="input" type="file" name="backupFile" accept=".json,application/json" required>
+ ${field('Backup passphrase','passphrase','password','','autocomplete="current-password" required')}
+ <button class="btn btn-outline" type="submit">Review and restore</button></form></section>`;
 }
 
 function askDelete(message){return window.confirm(message)}
