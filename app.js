@@ -12,6 +12,7 @@ import {TEMPLATE_ROWS,TEMPLATE_META} from './finance-template.js';
 import {wizardSeedExpenses,validateWizardSettings,wizardPreview,wizardBudgetLines} from './budget-wizard.js';
 import {currentScoutYear,duesForYear,scoutAccountYear,creditDifference,validScoutYear,googleSheetIdFromUrl,officialFileUrl} from './pack-config.js';
 import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from './settings-actions.js';
+import {normalizeGoogleConfiguration} from './google-config.js';
 
 const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
@@ -63,6 +64,16 @@ function settings(key){return dbState.settings.find(s=>s.key===key)?.value||'';}
 function activeYear(){return currentScoutYear(dbState.settings);}
 function annualDues(){return duesForYear(dbState.settings,activeYear());}
 async function saveSetting(key,value){await writeSetting(key,value);await refresh();}
+function enteredGoogleConfiguration(){
+ const form=root.querySelector('[data-form="google-settings"]');
+ const enteredClient=form?.elements.namedItem('googleClientId')?.value;
+ const enteredKey=form?.elements.namedItem('googleApiKey')?.value;
+ return normalizeGoogleConfiguration(enteredClient??settings('googleClientId'),enteredKey??settings('googleApiKey'));
+}
+async function persistGoogleConfiguration(config){
+ if(config.clientId!==settings('googleClientId'))await writeSetting('googleClientId',config.clientId);
+ if(config.apiKey!==settings('googleApiKey'))await writeSetting('googleApiKey',config.apiKey);
+}
 function route(view='home',event=''){
  ui.page=view;ui.eventId=event;ui.form='';ui.editTask='';
  const hash='#'+view+(event?'/'+encodeURIComponent(event):'');
@@ -243,7 +254,9 @@ function library(){
 function settingsPage(){
  return `${intro('Your device and Drive','Settings','Local privacy controls and optional, user-authorized Google Drive receipt uploads.')}
  <div class="split"><section class="panel stack"><h2>Connect Google services</h2><p>For receipt uploads, enable Drive API and Picker API. For upcoming events, enable Google Calendar API and grant calendar.readonly access. Use a Google OAuth Web Client ID authorized for your PackOps website. Tokens stay in memory; never enter client secrets.</p><p>Calendar connection status: <strong>${calendarConnected()?'Authorized for this session':'Not connected'}</strong>. Open Pack Calendar to select a calendar.</p>
- <form data-form="google-settings" class="stack">${field('Google OAuth web client ID','googleClientId','text',settings('googleClientId'))}${field('Google Picker API key','googleApiKey','text',settings('googleApiKey'))}<button class="btn" type="submit">Save configuration on this device</button></form>
+ <form data-form="google-settings" class="stack">${field('Google OAuth web client ID','googleClientId','text',settings('googleClientId'),'placeholder="12345-abcdef.apps.googleusercontent.com" autocomplete="off"')}${field('Google Picker API key','googleApiKey','text',settings('googleApiKey'),'placeholder="AIza..." autocomplete="off"')}<button class="btn" type="submit">Save configuration on this device</button></form>
+ <p class="meta">OAuth Client ID: <strong>${settings('googleClientId')?'Saved on this device':'NOT SAVED'}</strong> · Picker API key: <strong>${settings('googleApiKey')?'Saved on this device':'Not saved'}</strong></p>
+ <p class="meta">You can also enter the Client ID above and click Sign in to Google directly; PackOps will save it after successful authorization. Copy the Web Client ID, never the client secret.</p>
  <p>Status: <strong>${connected()?'Authorized for this session':'Not connected'}</strong></p>${btn('Sign in to Google','google-sign-in','btn btn-full')}${btn('Choose 2026–27 receipts destination','google-pick-folder','btn btn-outline btn-full')}${settings('googleFolder')?`<p class="setting-kv">Chosen destination: ${esc(settings('googleFolderName'))} (${esc(settings('googleFolder'))})</p>`:''}${btn('Disconnect','google-disconnect','btn btn-ghost btn-full')}
  <div class="privacy-strip">You must explicitly authorize the app and select the proper destination folder. The Drive API only uploads receipts when you click Upload. There is no background access to roster files or finances.</div></section>
  <section class="panel stack"><h2>Data & privacy</h2><p>This version saves event plans, roster copies, budgets, Scout credit snapshots, reimbursement proposals, volunteer tasks, and receipts in this browser's IndexedDB. Clearing browser storage removes local data. Different devices do not yet synchronize these records.</p><p>Never import private youth records onto shared or public devices. This version has no server-based role permissions.</p>${btn('Clear all local working data','clear-local','btn btn-danger btn-full')}${link(LINKS.packDrive,'Open authorized Pack Drive','btn btn-outline btn-full')}</section></div>
@@ -477,9 +490,26 @@ async function handleAction(action,trigger){
    try{const uploaded=await uploadReceipt(r,folder,client);await put('receipts',{...r,state:'uploaded',driveFileId:uploaded.id,error:'',uploadedAt:now()});await refresh();notify('Receipt uploaded to Google Drive');}
    catch(error){await put('receipts',{...r,state:'error',error:String(error.message||error)});await refresh();notify('Upload failed: '+error.message,true)}return;
   }
-  case 'google-sign-in':try{await authorize(settings('googleClientId'));notify('Google authorized for this session');render()}catch(e){notify(String(e.message),true)}return;
-  case 'google-pick-folder':try{const folder=await selectFolder(settings('googleApiKey'),settings('googleClientId'));await writeSetting('googleFolder',folder.id);await writeSetting('googleFolderName',folder.name);await refresh();notify('Destination folder selected');}catch(e){notify(String(e.message),true)}return;
-  case 'google-pick-backup-folder':try{const folder=await selectFolder(settings('googleApiKey'),settings('googleClientId'),'Choose restricted PackOps backup folder');await writeSetting('googleBackupFolder',folder.id);await writeSetting('googleBackupFolderName',folder.name);await refresh();notify('Encrypted backup folder selected')}catch(e){notify(String(e.message),true)}return;
+  case 'google-sign-in':try{
+    const config=enteredGoogleConfiguration();
+    await authorize(config.clientId);
+    await persistGoogleConfiguration(config);await refresh();
+    notify('Google authorized and Client ID saved on this PC.');
+   }catch(e){notify(String(e.message),true)}return;
+  case 'google-pick-folder':try{
+    const config=enteredGoogleConfiguration();
+    const folder=await selectFolder(config.apiKey,config.clientId);
+    await persistGoogleConfiguration(config);
+    await writeSetting('googleFolder',folder.id);await writeSetting('googleFolderName',folder.name);
+    await refresh();notify('Destination folder selected and Google configuration saved.');
+   }catch(e){notify(String(e.message),true)}return;
+  case 'google-pick-backup-folder':try{
+    const config=enteredGoogleConfiguration();
+    const folder=await selectFolder(config.apiKey,config.clientId,'Choose restricted PackOps backup folder');
+    await persistGoogleConfiguration(config);
+    await writeSetting('googleBackupFolder',folder.id);await writeSetting('googleBackupFolderName',folder.name);
+    await refresh();notify('Backup folder selected and Google configuration saved.');
+   }catch(e){notify(String(e.message),true)}return;
   case 'google-disconnect':disconnect();render();notify('Google token cleared from this session');return;
   case 'clear-local':if(askDelete('Permanently clear all LOCAL PackOps records on this device, including roster and queued receipts? This will not delete Google Drive files.')){await clearEverything();dbState.events=[];dbState.roster=[];ui.rosterPreview=null;await refresh();notify('All local PackOps records cleared')}return;
  }
@@ -609,7 +639,13 @@ async function handleForm(form){
   case 'meeting':for(const s of MEETING)await writeSetting('meeting:'+s.id,f('section:'+s.id));ui.editMeeting=false;break;
   case 'equipment':await put('equipment',{id:makeId(),name:f('name'),location:f('location'),holder:f('holder'),condition:f('condition'),notes:f('notes')});break;
   case 'bookmark':if(!safeUrl(f('url')))throw Error('Enter a valid HTTP(S) link');await put('bookmarks',{id:makeId(),label:f('label'),url:f('url'),description:f('description')});break;
-  case 'google-settings':await writeSetting('googleClientId',f('googleClientId'));await writeSetting('googleApiKey',f('googleApiKey'));notify('Google configuration saved locally');break;
+  case 'google-settings':{
+    const config=normalizeGoogleConfiguration(f('googleClientId'),f('googleApiKey'));
+    await persistGoogleConfiguration(config);
+    await refresh();
+    notify('OAuth Client ID saved on this PC. Click Sign in to Google.');
+    return;
+   }
   case 'calendar-ics':{
    const file=form.elements.file.files?.[0];if(!file)throw Error('Choose an .ics file');
    if(file.size>2*1024*1024)throw Error('Calendar file is larger than 2 MB');
