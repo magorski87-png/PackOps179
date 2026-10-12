@@ -3,7 +3,7 @@ import {TEMPLATE_META} from './finance-template.js';
 import {budgetWizardPanel} from './budget-wizard-ui.js';
 import {financeInsights,forecastSensitivity} from './finance-insights.js';
 
-export function financeView({state:allState,ui,esc,money,settings,intro,note,btn,link,field,select,textarea,empty,upcoming,year='2026-27',dues=null}){
+export function financeView({state:allState,ui,esc,money,settings,intro,note,btn,link,field,select,textarea,empty,upcoming,year='2026-27',dues=null,shared=false}){
  // Scope planning and imported financial snapshots to one Scout year.
  const belongs=record=>(record.sourceYear||record.year||'2026-27')===year;
  const state={...allState,budget:allState.budget.filter(belongs),financeLedger:allState.financeLedger.filter(belongs),financeAccounts:allState.financeAccounts.filter(belongs),financeReimbursements:allState.financeReimbursements.filter(belongs)};
@@ -91,6 +91,6 @@ export function financeView({state:allState,ui,esc,money,settings,intro,note,btn
   <section class="panel"><h2>How PackOps Finance works</h2><div class="finance-process"><div><strong>Plan</strong><small>Budget Builder</small></div><span>→</span><div><strong>Record</strong><small>Courtney's ledger</small></div><span>→</span><div><strong>Review</strong><small>Tag and reconcile</small></div><span>→</span><div><strong>Report</strong><small>Forecast & committee</small></div></div></section></div>`;
  };
  return `${intro('Better financial decisions','Pack Finance · '+year,'A one-stop workspace built around Courtney’s authoritative ledger, your annual budget, and Scout credit records.',(officialLedger?link(officialLedger,'Official ledger','btn btn-outline'):''))}
- ${note('FINANCIAL DATA STATUS: This version saves budgets, imports and working approvals locally on this device. There is not yet multi-leader authentication, shared sync, or automatic Drive ledger synchronization. Imported figures display as snapshots and must be checked against the treasurer’s files.',true)}${actions}
+ ${note('FINANCIAL DATA STATUS: ${shared?'Approved Pack leaders see RLS-protected shared finance records.':'Until Supabase Google sign-in is configured, finance records are device-local.'} Google Drive ledgers still require manually importing a verified CSV snapshot. Scout credit balances are restricted, and official Treasurer/Scoutbook files remain authoritative.',true)}${actions}
  ${tab==='overview'?overview():tab==='builder'?builder():tab==='accounts'?accounts():tab==='reimbursements'?reimbursements():tab==='ledger'?ledger():reports()}`;
 }
