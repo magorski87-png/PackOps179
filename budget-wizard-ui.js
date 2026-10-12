@@ -19,8 +19,8 @@ export function budgetWizardPanel({ui,year,dues,settings,budget,esc,money,field,
   result+=field('Expected Scouts','scouts','number',String(config.scouts??Number(settings('financeFundraisingScouts')||41)),'min="0" max="2000" step="1" required');
   result+=field('Registered adults','adults','number',String(config.adults??10),'min="0" max="500" step="1" required');
   result+=field('Pack annual dues per Scout ($)','dues','number',String(config.dues??dues??''),'min="0" max="10000" step="0.01" required');
-  result+=field('Target Pack fundraising proceeds ($)','fundraising','number',String(config.fundraising??Number(settings('financeFundraisingTarget')||3000)),'min="0" step="0.01" required');
-  result+=field('Assumed fundraising commission (%)','commission','number',String(config.commission??(Number(settings('financeFundraisingCommission')||0.35)*100)),'min="0.01" max="100" step="0.01" required');
+  result+=field('Optional VFW / community donations ($)','donations','number',String(config.donations??Number(settings('financeDonationEstimate')||0)),'min="0" step="0.01" required');
+  result+='<p class="privacy-strip">Pack popcorn proceeds are $0. Scouts may still earn individual popcorn credits; those are not Pack income. Donations are optional, never guaranteed.</p>';
   result+='</div><div class="row">'+btn('← Back','finance-wizard-back','btn btn-outline')+'<button class="btn" type="submit">Generate expense draft →</button></div></form>';
  }else if(step===2){
   result+='<p>Adjust every annual expense below. Amounts are draft estimates based on the selected source. Zero-dollar lines are allowed.</p><form data-form="wizard-expenses" class="stack">';
@@ -34,8 +34,8 @@ export function budgetWizardPanel({ui,year,dues,settings,budget,esc,money,field,
  }else{
   const p=wizardPreview(config,expenses);
   const existing=budget.filter(b=>(b.year||'2026-27')===year);
-  result+='<div class="finance-metrics"><div class="finance-kpi"><small>Planned spending</small><strong>'+money(p.totalExpense)+'</strong></div><div class="finance-kpi"><small>Projected income</small><strong>'+money(p.income)+'</strong></div><div class="finance-kpi"><small>Funding difference</small><strong>'+money(p.net)+'</strong></div><div class="finance-kpi"><small>Gross sales goal</small><strong>'+money(p.grossSalesTarget)+'</strong></div></div>';
-  result+='<p>Projected dues: '+money(p.projectedDues)+' for '+p.scouts+' Scouts at '+money(p.dues)+' each. Fundraising proceeds target: '+money(p.fundraising)+' at '+(p.commission*100).toFixed(1)+'% commission.</p>';
+  result+='<div class="finance-metrics"><div class="finance-kpi"><small>Planned spending</small><strong>'+money(p.totalExpense)+'</strong></div><div class="finance-kpi"><small>Projected income</small><strong>'+money(p.income)+'</strong></div><div class="finance-kpi"><small>Funding difference</small><strong>'+money(p.net)+'</strong></div><div class="finance-kpi"><small>Optional donations</small><strong>'+money(p.donations)+'</strong></div></div>';
+  result+='<p>Projected dues: '+money(p.projectedDues)+' for '+p.scouts+' Scouts at '+money(p.dues)+' each. Optional VFW/community donations: '+money(p.donations)+'. Pack popcorn income: $0.</p>';
   result+='<div class="privacy-strip">Forecast excludes existing cash and liabilities. A positive funding difference is NOT confirmed available cash. Actual receipts and spending come only from the treasurer ledger.</div>';
   result+='<p><strong>'+existing.length+' current-year budget lines</strong> will be archived to a LOCAL revision history and replaced when you confirm. Other Scout years remain unchanged.</p>';
   result+='<div class="row">'+btn('← Change expenses','finance-wizard-back','btn btn-outline')+btn('Save reviewed DRAFT budget','finance-wizard-save','btn')+'</div>';
