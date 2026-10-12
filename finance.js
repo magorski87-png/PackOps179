@@ -40,7 +40,9 @@ export function parseLedgerCsv(content){
  if(!parsed.length)throw Error('No non-empty ledger transactions found');
  return parsed;
 }
-export function parseScoutCreditsCsv(content,annualDues=105){
+export function parseScoutCreditsCsv(content,annualDues){
+ if(!Number.isFinite(Number(annualDues))||Number(annualDues)<0||Number(annualDues)>10000||annualDues===null||annualDues==='')throw Error('Set the Scout-year Pack dues in Settings before importing Scout credits.');
+ annualDues=Number(annualDues);
  const rows=csvParse(content.replace(/^\uFEFF/,''));
  const at=rows.findIndex(r=>r.some(c=>normal(c)==='first name')&&r.some(c=>normal(c)==='last name')&&r.some(c=>/carryover|popcorn earnings|credit or dues/i.test(normal(c))));
  if(at<0)throw Error('Scout credit CSV must include First Name, Last Name, and carryover/popcorn/balance columns.');
