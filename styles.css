@@ -150,3 +150,11 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .loading-screen{color:var(--cub-blue)}
 .setting-kv{color:var(--cub-blue)}
 @media print{body{background:#fff}.finance-report .finance-table th{background:#EAF2FD!important}}
+
+/* v0.6 Inventory and family portals */
+.equipment-controls{display:grid;grid-template-columns:minmax(200px,2fr) minmax(165px,1fr) minmax(155px,1fr);gap:12px;align-items:end}
+.equipment-controls .field{min-width:0}
+.equipment-controls label{font-size:11px;color:var(--cub-blue);font-weight:750}
+.equipment-controls .input{min-height:43px}
+@media(max-width:800px){.equipment-controls{grid-template-columns:1fr 1fr}.equipment-controls .field:first-child{grid-column:1/-1}}
+@media(max-width:540px){.equipment-controls{grid-template-columns:1fr}.equipment-controls .field:first-child{grid-column:auto}}
