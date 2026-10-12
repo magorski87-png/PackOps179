@@ -1,4 +1,4 @@
-import {TABLES,list as localList,get,put as localPut,remove as localRemove,readSetting,writeSetting,clearEverything,replaceAnnualBudget as localReplaceAnnualBudget,replaceAnnualLedger as localReplaceAnnualLedger} from './db.js';
+import {TABLES,list as localList,get,put as localPut,remove as localRemove,readSetting,writeSetting as localWriteSetting,clearEverything,replaceAnnualBudget as localReplaceAnnualBudget,replaceAnnualLedger as localReplaceAnnualLedger} from './db.js';
 import {LINKS,MENU,MEETING,DEN_NAMES,isoToday,makeId,money,esc,safeUrl,niceDate,summary,completion,csvParse,brief} from './data.js';
 import {authorize,connected,disconnect,selectFolder,uploadReceipt,uploadEncryptedBackup} from './drive.js';
 import {parseRoster,importPrivacySummary,denGroup,exportRoster,groupScouts,RANKS} from './roster-import.js';
@@ -15,7 +15,7 @@ import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from '
 import {normalizeGoogleConfiguration} from './google-config.js';
 import {EQUIPMENT_CATEGORIES,normalizeEquipment,queryEquipment,equipmentCsv} from './equipment-utils.js';
 import {PACK_CLOUD_CONFIG} from './cloud-config.js';
-import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,watchCloudChanges,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest} from './cloud.js';
+import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,watchCloudChanges,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest,fetchPackSettings,savePackSetting} from './cloud.js';
 import {cloudSettingsPanel} from './cloud-panel.js';
 import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
 import {familyResponseCsv} from './family-ui.js';
@@ -28,6 +28,11 @@ const dbState=Object.fromEntries(TABLES.map(t=>[t,t==='settings'?[]:[]]));
 const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name',equipmentQuery:'',equipmentCategory:'all',equipmentSort:'name-asc',equipmentExport:'filtered',editEquipment:'',cloudError:'',cloudMembers:[],cloudInvites:[],familyForms:[],familyActive:'',familyResults:null,familySearch:'',familyLink:'',familyData:null,familySent:false,denChoice:''};
 const now=()=>Date.now();
 const cloudActive=()=>Boolean(cloudState().member);
+async function writeSetting(key,value){
+ const isShared=key==='activeScoutYear'||key.startsWith('finance');
+ if(cloudActive()&&isShared&&['admin','cubmaster','treasurer'].includes(cloudState().member.role))await savePackSetting(key,value);
+ return localWriteSetting(key,value);
+}
 const cloudSettings=()=>({projectUrl:settings('supabaseUrl')||PACK_CLOUD_CONFIG.projectUrl,publishableKey:settings('supabasePublishableKey')||PACK_CLOUD_CONFIG.publishableKey,packId:settings('supabasePackId')||PACK_CLOUD_CONFIG.packId});
 const cloudConfigured=()=>Boolean(cloudSettings().projectUrl);
 async function put(table,row){
@@ -132,6 +137,12 @@ const note=(msg,warning=false)=>`<div class="note${warning?' warn':''}">${msg}</
 async function refresh(){
  const result=await Promise.all(TABLES.map(t=>list(t)));
  TABLES.forEach((t,i)=>dbState[t]=result[i]);
+ if(cloudActive()&&['admin','cubmaster','treasurer'].includes(cloudState().member.role)){
+  const shared=await fetchPackSettings();
+  const byKey=new Map(dbState.settings.map(s=>[s.key,s]));
+  for(const entry of shared)byKey.set(entry.key,entry);
+  dbState.settings=[...byKey.values()];
+ }
  render();
 }
 function settings(key){return dbState.settings.find(s=>s.key===key)?.value||'';}
@@ -760,7 +771,21 @@ async function handleForm(form){
    for(const [key,value] of rows)await writeSetting(key,value);
    await refresh();notify('Official Drive source links saved for '+year);return;
   }
-  case 'pack-year-config':if(await saveYearConfiguration(form,dbState.financeAccounts)){await refresh();notify('Annual Pack dues saved for '+activeYear())}return;
+  case 'pack-year-config':{
+   if(!cloudActive()){
+    if(await saveYearConfiguration(form,dbState.financeAccounts)){await refresh();notify('Annual Pack dues saved locally')}
+    return;
+   }
+   const year=f('year'),raw=f('dues'),dues=Number(raw);
+   if(!validScoutYear(year)||raw===''||!Number.isFinite(dues)||dues<0||dues>10000)throw Error('Enter a valid year and annual dues');
+   if(!askDelete('Update Pack '+year+' dues to '+money(dues)+' for all authorized finance leaders? Official Scoutbook/Google Sheets are not modified.'))return;
+   await writeSetting('activeScoutYear',year);await writeSetting('financeDues:'+year,String(dues));
+   for(const account of dbState.financeAccounts.filter(x=>scoutAccountYear(x)===year)){
+    const diff=creditDifference(account,dues);
+    await put('financeAccounts',{...account,calculated:Math.round((Number(account.carryover||0)+Number(account.earnings||0)-dues)*100)/100,needsReview:diff!==null&&Math.abs(diff)>0.011});
+   }
+   await refresh();notify('Annual dues shared securely with authorized finance leaders');return;
+  }
   case 'backup-export':{const message=await exportPackOpsBackup(form,settings);if(message)notify(message);return;}
   case 'backup-restore':if(await restorePackOpsFromFile(form)){ui.rosterSelected.clear();ui.googleEvents=[];ui.calendarFetchedAt=0;await refresh();notify('PackOps restored. Reconnect Google services.')}return;
   case 'wizard-source':{
