@@ -36,6 +36,9 @@ async function writeSetting(key,value){
 const cloudSettings=()=>({projectUrl:settings('supabaseUrl')||PACK_CLOUD_CONFIG.projectUrl,publishableKey:settings('supabasePublishableKey')||PACK_CLOUD_CONFIG.publishableKey,packId:settings('supabasePackId')||PACK_CLOUD_CONFIG.packId});
 const cloudConfigured=()=>Boolean(cloudSettings().projectUrl);
 async function put(table,row){
+ if(cloudActive()&&table==='tasks'&&cloudState().member?.role==='den_leader'&&!row.den){
+  row={...row,den:ui.denChoice||cloudState().member.den_scopes?.[0]||''};
+ }
  if(table==='receipts'){
   await localPut(table,row);
   if(cloudActive()&&row.driveFileId){const {blob,...metadata}=row;await saveCloudRow(table,metadata)}
