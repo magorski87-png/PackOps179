@@ -13,12 +13,13 @@ import {wizardSeedExpenses,validateWizardSettings,wizardPreview,wizardBudgetLine
 import {currentScoutYear,duesForYear,scoutAccountYear,creditDifference,validScoutYear,googleSheetIdFromUrl,officialFileUrl} from './pack-config.js';
 import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from './settings-actions.js';
 import {normalizeGoogleConfiguration} from './google-config.js';
+import {EQUIPMENT_CATEGORIES,normalizeEquipment,queryEquipment,equipmentCsv} from './equipment-utils.js';
 
 const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
 let pwaInstallPrompt=null;
 const dbState=Object.fromEntries(TABLES.map(t=>[t,t==='settings'?[]:[]]));
-const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name'};
+const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name',equipmentQuery:'',equipmentCategory:'all',equipmentSort:'name-asc',equipmentExport:'filtered',editEquipment:''};
 const now=()=>Date.now();
 const formData=(form,key)=>String(new FormData(form).get(key)||'').trim();
 const option=(value,label,current)=>`<option value="${esc(value)}"${String(value)===String(current)?' selected':''}>${esc(label)}</option>`;
@@ -232,10 +233,31 @@ function roster(){
  ${!selected?'<span class="meta">Select Scouts above before exporting.</span>':''}</section>`;
 }
 function equipment(){
- const rows=[...dbState.equipment].sort((a,b)=>a.name.localeCompare(b.name));
- return `${intro('Know what the Pack owns','Equipment & Supplies','Track where supplies are stored, who has them, and what needs attention.',btn('+ Add equipment','show-equipment','btn'))}
- ${ui.form==='equipment'?`<section class="panel"><h2>New equipment item</h2><form data-form="equipment" class="stack"><div class="form-grid">${field('Item / kit name','name','text','','required maxlength="120"')}${field('Storage location','location')}${field('Checked out to (optional)','holder')}${select('Condition','condition',[['ready','Ready'],['verify','Needs verification'],['repair','Repair required']],'ready')}${textarea('Kit contents / notes','notes')}</div><div class="form-actions"><button class="btn" type="submit">Save item</button>${btn('Cancel','cancel-form')}</div></form></section>`:''}
- ${rows.length?`<div class="cards">${rows.map(r=>`<article class="event-card"><div class="row-between"><h3>${esc(r.name)}</h3><span class="pill ${r.condition==='repair'?'danger':r.condition==='ready'?'success':'warning'}">${r.condition==='repair'?'Repair':r.condition==='ready'?'Ready':'Verify'}</span></div><div class="small-info">📍 ${esc(r.location||'Location not specified')}</div><div class="small-info">${r.holder?'👤 With '+esc(r.holder):'Available / holder not specified'}</div>${r.notes?`<p>${esc(r.notes)}</p>`:''}<div class="row">${btn('Change status','equipment-status','btn btn-outline btn-small',`data-id="${r.id}"`)}${btn('Remove','delete-equipment','btn btn-danger btn-small',`data-id="${r.id}"`)}</div></article>`).join('')}</div>`:empty('🎒','Inventory starts here','Add the rocket kit, Pack flags, tents and camp equipment. QR labels can come later.',btn('+ Add first item','show-equipment','btn'))}`;
+ const categorySet=[...new Set([...EQUIPMENT_CATEGORIES,...dbState.equipment.map(r=>normalizeEquipment(r).category)])].sort((a,b)=>a.localeCompare(b));
+ const rows=queryEquipment(dbState.equipment,{search:ui.equipmentQuery,category:ui.equipmentCategory,sort:ui.equipmentSort});
+ const editing=dbState.equipment.find(r=>r.id===ui.editEquipment);
+ const itemForm=(editing||ui.form==='equipment')?`<section class="panel stack"><h2>${editing?'Edit equipment':'Add equipment'}</h2>
+ <form data-form="equipment" data-edit-id="${esc(editing?.id||'')}" class="stack"><div class="form-grid">
+ ${field('Item / kit name','name','text',editing?.name||'','required maxlength="120"')}
+ <div class="field"><label for="equipment-category-name">Category</label><input id="equipment-category-name" class="input" type="text" name="category" list="equipment-categories" value="${esc(editing?.category||'General Equipment')}" required maxlength="100"><datalist id="equipment-categories">${categorySet.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist></div>
+ ${field('Quantity','quantity','number',String(editing?.quantity??1),'min="0" max="999999" step="1" required')}
+ ${field('Storage location','location','text',editing?.location||'')}
+ ${field('Checked out to / held by','holder','text',editing?.holder||'')}
+ ${select('Condition','condition',[['ready','Ready'],['verify','Needs verification'],['repair','Repair required']],editing?.condition||'ready')}
+ ${field('Last physically verified','verifiedAt','date',editing?.verifiedAt||'')}
+ </div>${textarea('Kit contents / notes','notes',editing?.notes||'')}
+ <div class="form-actions"><button type="submit" class="btn">${editing?'Save changes':'Add to inventory'}</button>${btn('Cancel','equipment-cancel','btn btn-outline')}</div></form></section>`:'';
+ return `${intro('Know what the Pack owns','Equipment & Supplies','Search by item, category, storage location, holder or contents. Export what you see, or your full list.',btn('+ Add equipment','show-equipment','btn'))}
+ ${itemForm}
+ <section class="panel stack"><div class="row-between"><h2>Equipment inventory</h2><span class="pill">${rows.length} of ${dbState.equipment.length} matching</span></div>
+ <div class="equipment-controls">
+ <div class="field"><label for="equipment-search">Find equipment</label><input id="equipment-search" class="input" name="equipment-search" type="search" autocomplete="off" placeholder="Try rocket, flags, storage, or a leader…" value="${esc(ui.equipmentQuery)}"></div>
+ ${select('Category','equipment-filter', [['all','All categories'],...categorySet.map(x=>[x,x])],ui.equipmentCategory,'data-change="equipment-filter"')}
+ ${select('Sort by','equipment-sort',[['name-asc','Name A–Z'],['name-desc','Name Z–A'],['category','Category'],['location','Location'],['condition','Condition'],['verified','Last verified']],ui.equipmentSort,'data-change="equipment-sort"')}
+ </div>
+ <div class="row wrap">${btn('Export matching ('+rows.length+') CSV','equipment-export','btn btn-outline', 'data-scope="filtered"')}${btn('Export entire inventory CSV','equipment-export','btn btn-outline','data-scope="all"')}${ui.equipmentQuery?btn('Clear search','equipment-clear-search','btn btn-ghost'):''}</div>
+ <p class="meta">Search updates as you type, ranking word beginnings before other matches. CSV opens in Excel or Google Sheets. Inventory records remain editable and are not modified by export.</p></section>
+ ${rows.length?`<div class="cards">${rows.map(r=>`<article class="event-card"><div class="row-between"><h3>${esc(r.name)}</h3><span class="pill ${r.condition==='repair'?'danger':r.condition==='ready'?'success':'warning'}">${r.condition==='repair'?'Repair':r.condition==='ready'?'Ready':'Verify'}</span></div><div class="row-between"><span class="pill info">${esc(r.category)}</span><strong>Qty ${r.quantity}</strong></div><div class="small-info">📍 ${esc(r.location||'Location not specified')}</div><div class="small-info">${r.holder?'👤 With '+esc(r.holder):'No current holder specified'}</div>${r.verifiedAt?`<div class="meta">Last verified ${esc(r.verifiedAt)}</div>`:''}${r.notes?`<p>${esc(r.notes)}</p>`:''}<div class="row wrap">${btn('Edit','equipment-edit','btn btn-outline btn-small',`data-id="${esc(r.id)}"`)}${btn('Change status','equipment-status','btn btn-outline btn-small',`data-id="${esc(r.id)}"`)}${btn('Remove','delete-equipment','btn btn-danger btn-small',`data-id="${esc(r.id)}"`)}</div></article>`).join('')}</div>`:dbState.equipment.length?empty('🔍','No matches','Change your search or category to find equipment.'):empty('🎒','Inventory starts here','Add the rocket kit, Pack flags, tents and camp equipment.',btn('+ Add first item','show-equipment','btn'))}`;
 }
 function assistant(){
  const s=summary(dbState.tasks);const issue=[...s.overdue,...s.unassigned.filter(x=>!s.overdue.includes(x)),...s.dueSoon.filter(x=>!s.overdue.includes(x)&&!s.unassigned.includes(x))].slice(0,12);
@@ -455,7 +477,11 @@ async function handleAction(action,trigger){
   case 'show-task':ui.form='task';ui.editTask='';render();return;
   case 'show-event-task':ui.form='task';ui.editTask='';render();return;
   case 'show-event':ui.form='event';render();return;
-  case 'show-equipment':ui.form='equipment';render();return;
+  case 'show-equipment':ui.form='equipment';ui.editEquipment='';render();return;
+  case 'equipment-edit':ui.editEquipment=id;ui.form='equipment';render();return;
+  case 'equipment-cancel':ui.editEquipment='';ui.form='';render();return;
+  case 'equipment-clear-search':ui.equipmentQuery='';render();return;
+  case 'equipment-export':{const rows=action.dataset.scope==='all'?queryEquipment(dbState.equipment,{sort:ui.equipmentSort}):queryEquipment(dbState.equipment,{search:ui.equipmentQuery,category:ui.equipmentCategory,sort:ui.equipmentSort});downloadCsv(equipmentCsv(rows),`Pack179_Equipment_${isoToday()}.csv`);notify(`Exported ${rows.length} equipment entries`);return;}
   case 'show-bookmark':ui.form='bookmark';render();return;
   case 'cancel-form':ui.form='';ui.editTask='';render();return;
   case 'calendar-plan':{
@@ -654,7 +680,13 @@ async function handleForm(form){
    await put('receipts',{id:makeId(),fileName:file.name,mimeType:file.type,blob:file,createdAt:now(),vendor:f('vendor'),amount:f('amount')===''?null:Number(f('amount')),eventId:f('eventId'),note:f('note'),state:'local'});ui.receiptEventId='';break;
   }
   case 'meeting':for(const s of MEETING)await writeSetting('meeting:'+s.id,f('section:'+s.id));ui.editMeeting=false;break;
-  case 'equipment':await put('equipment',{id:makeId(),name:f('name'),location:f('location'),holder:f('holder'),condition:f('condition'),notes:f('notes')});break;
+  case 'equipment':{
+   const qty=Number(f('quantity'));if(!Number.isInteger(qty)||qty<0||qty>999999)throw Error('Enter a valid whole-number quantity');
+   if(!f('category'))throw Error('Category is required');
+   const old=dbState.equipment.find(r=>r.id===form.dataset.editId);
+   await put('equipment',{...old,id:old?.id||makeId(),name:f('name'),category:f('category'),quantity:qty,location:f('location'),holder:f('holder'),condition:f('condition'),verifiedAt:f('verifiedAt'),notes:f('notes'),updatedAt:now()});
+   ui.editEquipment='';break;
+  }
   case 'bookmark':if(!safeUrl(f('url')))throw Error('Enter a valid HTTP(S) link');await put('bookmarks',{id:makeId(),label:f('label'),url:f('url'),description:f('description')});break;
   case 'google-settings':{
     const config=normalizeGoogleConfiguration(f('googleClientId'),f('googleApiKey'));
@@ -712,6 +744,8 @@ root.addEventListener('change',async event=>{
   // Avoid re-rendering while a multi-select operation is underway; other indicators refresh on next filter change.
   return;
  }
+ if(target.dataset.change==='equipment-filter'){ui.equipmentCategory=target.value;render();return}
+ if(target.dataset.change==='equipment-sort'){ui.equipmentSort=target.value;render();return}
  if(target.dataset.change==='roster-den'){ui.rosterDen=target.value;render();return}
  if(target.dataset.change==='roster-rank'){ui.rosterRank=target.value;render();return}
  if(target.dataset.change==='roster-sort'){ui.rosterSort=target.value;render();return}
@@ -721,6 +755,9 @@ root.addEventListener('change',async event=>{
  }
 });
 root.addEventListener('input',event=>{
+ if(event.target.name==='equipment-search'){
+  const val=event.target.value,pos=event.target.selectionStart;ui.equipmentQuery=val;render();const el=root.querySelector('[name="equipment-search"]');if(el){el.focus();if(pos!==null)el.setSelectionRange(pos,pos)}return;
+ }
  if(event.target.name==='finance-account-search'){
   const text=event.target.value,index=event.target.selectionStart;ui.accountQuery=text;render();
   const el=root.querySelector('[name="finance-account-search"]');if(el){el.focus();el.setSelectionRange(index,index)}return;
