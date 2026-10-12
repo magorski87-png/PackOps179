@@ -3,7 +3,7 @@
 import {csvParse} from './data.js';
 
 export const EXPENSE_CATEGORIES=['Advancement & Awards','Blue & Gold','Campouts','Pack Meetings','Pinewood Derby','Service Projects','Recruiting','Equipment & Supplies','Training','Insurance & Fees','Scout Assistance','Administration','Other'];
-export const INCOME_CATEGORIES=['Pack Dues','Popcorn Fundraising','Other Fundraising','Event Fees','Donations','Other Income'];
+export const INCOME_CATEGORIES=['Pack Dues','VFW / Community Donations','Donations','Event Fees','Other Income'];
 export const FINANCE_TABS=['overview','builder','accounts','reimbursements','ledger','reports'];
 export const round=n=>Math.round((Number(n)||0)*100)/100;
 export function amount(raw){
@@ -70,7 +70,12 @@ export function financialSnapshot({budget=[],ledger=[],tags=[],reimbursements=[]
  const unclassified=categorized.filter(r=>!r.tag?.kind||r.tag.kind==='unclassified');
  const lastBalance=[...ledger].reverse().find(x=>x.balance!==null)?.balance??null;
  const plannedExpenses=round(budget.filter(r=>(r.type||'expense')==='expense').reduce((a,r)=>a+amount(r.planned),0));
- const plannedIncome=round(budget.filter(r=>r.type==='income').reduce((a,r)=>a+amount(r.planned),0));
+ // Older draft budgets might contain an obsolete Pack popcorn-income assumption.
+  // Keep the original record for audit, but do NOT include it in Pack operating income.
+  const obsoletePopcornIncome=round(budget.filter(r=>r.type==='income'&&/popcorn/i.test(r.category||'')).reduce((a,r)=>a+amount(r.planned),0));
+  const plannedIncome=round(budget.filter(r=>r.type==='income'&&!/popcorn/i.test(r.category||'')).reduce((a,r)=>a+amount(r.planned),0));
+  const cashDeposits=round(posted.reduce((a,r)=>a+Math.max(0,Number(r.credit)||0),0));
+  const cashWithdrawals=round(posted.reduce((a,r)=>a+Math.max(0,Number(r.debit)||0),0));
  const pending=round(reimbursements.filter(r=>!['declined','paid'].includes(r.status)).reduce((a,r)=>a+amount(r.amount),0));
  const categorization=new Map();
  for(const r of categorized.filter(r=>r.tag?.kind==='expense')){const category=r.tag.category||'Uncategorized';categorization.set(category,round((categorization.get(category)||0)+r.debit-r.credit));}
@@ -89,7 +94,7 @@ export function financialSnapshot({budget=[],ledger=[],tags=[],reimbursements=[]
  const baseline=round(settings.restricted||0),reserve=round(settings.reserve||0);
  // Never label this as cash available to spend; source is ledger, commitments need reconciliation.
  const estimatedHeadroom=lastBalance===null?null:round(lastBalance-pending-baseline-reserve);
- return {spent,received,unclassified:unclassified.length,lastBalance,plannedExpenses,plannedIncome,pending,expenseCats,estimatedHeadroom,reserve,restricted:baseline,ledgerCount:posted.length};
+ return {spent,received,cashDeposits,cashWithdrawals,obsoletePopcornIncome,unclassified:unclassified.length,lastBalance,plannedExpenses,plannedIncome,pending,expenseCats,estimatedHeadroom,reserve,restricted:baseline,ledgerCount:posted.length};
 }
 export function forecast({startingCash,expectedIncome=0,expectedExpenses=0,reserve=0,restricted=0}){
  if(startingCash===null||!Number.isFinite(Number(startingCash)))return null;
@@ -107,3 +112,34 @@ export function safeCsvValue(x){
 }
 export function csvExport(rows,fields){return [fields.map(safeCsvValue).join(','),...rows.map(r=>fields.map(f=>safeCsvValue(r[f])).join(','))].join('\r\n');}
 export function reportsRows(s){return s.expenseCats.map(r=>({Category:r.category,Planned:r.planned,Actual:r.actual,Variance:round(r.planned-r.actual)}));}
+
+// Ledger classifications are always REVIEW SUGGESTIONS, never automatic postings.
+export function suggestLedgerIncome(row){
+ if(!row||row.isOpening||Number(row.credit)<=0||Number(row.debit)>0)return null;
+ const description=normal(row.description);
+ if(/\b(popcorn|scout credit|account transfer|transfer|refund|reimbursement|carryover)\b/.test(description))return null;
+ if(/\b(vfw|veterans of foreign wars)\b/.test(description)&&/\b(donat|gift|support|contribution)/.test(description))return 'VFW / Community Donations';
+ if(/\b(annual dues|pack dues|membership dues|scout dues)\b/.test(description))return 'Pack Dues';
+ if(/\b(donation|donated|contribution)\b/.test(description))return 'Donations';
+ return null;
+}
+export function ledgerImportReview(rows){
+ if(!rows.length)throw Error('No ledger rows to review');
+ const withBalances=rows.filter(r=>r.balance!==null);
+ const last=withBalances.at(-1);
+ const balanceWarnings=[];
+ let prior=null;
+ for(const row of rows){
+  if(row.balance===null)continue;
+  if(prior!==null&&!row.isOpening){
+   const implied=round(prior+(Number(row.credit)||0)-(Number(row.debit)||0));
+   if(Math.abs(implied-row.balance)>0.02)balanceWarnings.push(row.sourceRow);
+  }
+  prior=row.balance;
+ }
+ return {rows:rows.length,opening:withBalances.find(x=>x.isOpening)?.balance??null,
+  lastBalance:last?.balance??null,lastBalanceDate:last?.date||'',lastBalanceItem:last?.description||'',
+  deposits:round(rows.filter(r=>!r.isOpening).reduce((s,r)=>s+(Number(r.credit)||0),0)),
+  withdrawals:round(rows.filter(r=>!r.isOpening).reduce((s,r)=>s+(Number(r.debit)||0),0)),
+  balanceWarnings:balanceWarnings.slice(0,15)};
+}
