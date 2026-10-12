@@ -786,7 +786,12 @@ async function handleForm(form){
    }
    await refresh();notify('Annual dues shared securely with authorized finance leaders');return;
   }
-  case 'backup-export':{const message=await exportPackOpsBackup(form,settings);if(message)notify(message);return;}
+  case 'backup-export':{
+   if(cloudActive()&&!['admin','cubmaster'].includes(cloudState().member.role))throw Error('Only Pack administrators can export a shared snapshot containing potentially sensitive youth records');
+   const snapshot=cloudActive()?Object.fromEntries(TABLES.map(t=>[t,dbState[t]])):null;
+   const message=await exportPackOpsBackup(form,settings,snapshot);
+   if(message)notify(message);return;
+  }
   case 'backup-restore':if(await restorePackOpsFromFile(form)){ui.rosterSelected.clear();ui.googleEvents=[];ui.calendarFetchedAt=0;await refresh();notify('PackOps restored. Reconnect Google services.')}return;
   case 'wizard-source':{
    const source=f('source');
