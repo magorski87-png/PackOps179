@@ -5,7 +5,7 @@ The GitHub Pages frontend is deployable without access to secrets. Shared Pack r
 ## 1. Create a Pack-controlled Supabase project
 
 - Create a Supabase project in an appropriate **US hosting region**, owned by a Pack-controlled administrative account with a second trusted Pack administrator.
-- Use the **SQL Editor** to run, IN FILENAME ORDER, every SQL file under `supabase/migrations/` (001 through 006).
+- Use the **SQL Editor** to run, IN FILENAME ORDER, every SQL file under `supabase/migrations/` (001 through 007).
 - Note the project's URL and its **publishable key** from Supabase Project Settings. These identifiers are intended for a browser with RLS enabled. **Never** paste or commit a `service_role` key, `sb_secret_` key, Google OAuth client secret, or Resend API key.
 - In the SQL Editor create the Pack itself (this is an example, not executed automatically):
 
