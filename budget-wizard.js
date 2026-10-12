@@ -26,13 +26,12 @@ export function wizardSeedExpenses({source='template',scouts=TEMPLATE_META.membe
 export function validateWizardSettings(x){
  const year=String(x.year||'');
  if(!/^20\d\d-\d\d$/.test(year)||Number(year.slice(5))!==(Number(year.slice(0,4))+1)%100)throw Error('Choose a valid Scout year');
- const scouts=Number(x.scouts),adults=Number(x.adults),dues=Number(x.dues),fundraising=Number(x.fundraising),commission=Number(x.commission);
+ const scouts=Number(x.scouts),adults=Number(x.adults),dues=Number(x.dues),donations=Number(x.donations??0);
  if(!Number.isInteger(scouts)||scouts<0||scouts>2000)throw Error('Expected Scouts must be 0–2000');
  if(!Number.isInteger(adults)||adults<0||adults>500)throw Error('Registered adults must be 0–500');
  if(!Number.isFinite(dues)||dues<0||dues>10000||x.dues==='')throw Error('Set dues for the Scout year');
- if(!Number.isFinite(fundraising)||fundraising<0||fundraising>1e8)throw Error('Enter a valid fundraising proceeds target');
- if(!Number.isFinite(commission)||commission<=0||commission>100)throw Error('Commission must be greater than 0% and at most 100%');
- return {year,scouts,adults,dues:cents(dues),fundraising:cents(fundraising),commission:commission/100};
+ if(!Number.isFinite(donations)||donations<0||donations>1e8||x.donations==='')throw Error('Enter a valid optional donation estimate');
+ return {year,scouts,adults,dues:cents(dues),donations:cents(donations),fundraising:0,commission:0};
 }
 export function wizardPreview(config,expenses){
  const x=validateWizardSettings(config);
@@ -42,15 +41,14 @@ export function wizardPreview(config,expenses){
   if(!Number.isFinite(v)||v<0||v>1e9)throw Error('All planned expenses must be nonnegative amounts');
   return a+v;
  },0);
- const projectedDues=cents(x.scouts*x.dues),totalExpense=cents(sum),income=cents(projectedDues+x.fundraising);
- return {...x,projectedDues,totalExpense,income,net:cents(income-totalExpense),
-  grossSalesTarget:cents(x.fundraising/x.commission)};
+ const projectedDues=cents(x.scouts*x.dues),totalExpense=cents(sum),income=cents(projectedDues+x.donations);
+ return {...x,projectedDues,totalExpense,income,net:cents(income-totalExpense),grossSalesTarget:0};
 }
 export function wizardBudgetLines(config,expenses){
  const p=wizardPreview(config,expenses);
  return [
   ...expenses.map(e=>({year:p.year,type:'expense',category:e.category,detail:e.detail,planned:cents(e.planned),note:'DRAFT: annual budget wizard ('+e.origin+'). Verify quantities and cost assumptions before approval.',source:'budget-wizard'})),
-  {year:p.year,type:'income',category:'Pack Dues',detail:p.scouts+' Scouts × $'+p.dues.toFixed(2)+' annual dues',planned:p.projectedDues,note:'DRAFT projection; not received cash.',source:'budget-wizard'},
-  {year:p.year,type:'income',category:'Popcorn Fundraising',detail:'Projected Pack proceeds',planned:p.fundraising,note:'DRAFT goal, not received cash. Commission assumption '+(p.commission*100).toFixed(1)+'%.',source:'budget-wizard'}
+  {year:p.year,type:'income',category:'Pack Dues',detail:p.scouts+' Scouts × $'+p.dues.toFixed(2)+' annual dues',planned:p.projectedDues,note:'DRAFT dues projection; not received cash.',source:'budget-wizard'},
+  {year:p.year,type:'income',category:'Donations',detail:'Optional VFW / community donations',planned:p.donations,note:'DRAFT estimate only. Donations are not guaranteed or received cash.',source:'budget-wizard'}
  ];
 }
