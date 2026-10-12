@@ -16,10 +16,10 @@ export function budgetWizardPanel({ui,year,dues,settings,budget,esc,money,field,
   result+='<div class="privacy-strip">The template and last-year values are suggestions, not verified costs. Official ledger transactions are not altered.</div><button class="btn" type="submit">Continue →</button></form>';
  }else if(step===1){
   result+='<p>Set your enrollment and income assumptions. Dues for '+esc(year)+' are saved separately from all other Scout years.</p><form data-form="wizard-assumptions" class="stack"><div class="form-grid">';
-  result+=field('Expected Scouts','scouts','number',String(config.scouts??settings('financeFundraisingScouts')??41),'min="0" max="2000" step="1" required');
+  result+=field('Expected Scouts','scouts','number',String(config.scouts??Number(settings('financeFundraisingScouts')||41)),'min="0" max="2000" step="1" required');
   result+=field('Registered adults','adults','number',String(config.adults??10),'min="0" max="500" step="1" required');
   result+=field('Pack annual dues per Scout ($)','dues','number',String(config.dues??dues??''),'min="0" max="10000" step="0.01" required');
-  result+=field('Target Pack fundraising proceeds ($)','fundraising','number',String(config.fundraising??settings('financeFundraisingTarget')??3000),'min="0" step="0.01" required');
+  result+=field('Target Pack fundraising proceeds ($)','fundraising','number',String(config.fundraising??Number(settings('financeFundraisingTarget')||3000)),'min="0" step="0.01" required');
   result+=field('Assumed fundraising commission (%)','commission','number',String(config.commission??(Number(settings('financeFundraisingCommission')||0.35)*100)),'min="0.01" max="100" step="0.01" required');
   result+='</div><div class="row">'+btn('← Back','finance-wizard-back','btn btn-outline')+'<button class="btn" type="submit">Generate expense draft →</button></div></form>';
  }else if(step===2){
