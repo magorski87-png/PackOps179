@@ -1,4 +1,4 @@
-import {TABLES,list,get,put,remove,readSetting,writeSetting,clearEverything,replaceAnnualBudget} from './db.js';
+import {TABLES,list,get,put,remove,readSetting,writeSetting,clearEverything,replaceAnnualBudget,replaceAnnualLedger} from './db.js';
 import {LINKS,MENU,MEETING,DEN_NAMES,isoToday,makeId,money,esc,safeUrl,niceDate,summary,completion,csvParse,brief} from './data.js';
 import {authorize,connected,disconnect,selectFolder,uploadReceipt,uploadEncryptedBackup} from './drive.js';
 import {parseRoster,importPrivacySummary,denGroup,exportRoster,groupScouts,RANKS} from './roster-import.js';
@@ -6,7 +6,7 @@ import {calendarAuthorize,calendarList,calendarUpcoming,disconnectCalendar,calen
 import {parseIcs,uniqueUpcoming} from './calendar-import.js';
 import {linkedWorkspaceId,matchExistingWorkspace,workspaceForCalendarEvent,workspaceForSync} from './event-sync.js';
 import {financeView} from './finance-ui.js';
-import {parseLedgerCsv,parseScoutCreditsCsv,financialSnapshot,reimbursePaidAllowed,csvExport,reportsRows,amount,EXPENSE_CATEGORIES} from './finance.js';
+import {parseLedgerCsv,parseScoutCreditsCsv,financialSnapshot,reimbursePaidAllowed,csvExport,reportsRows,amount,EXPENSE_CATEGORIES,ledgerImportReview,suggestLedgerIncome} from './finance.js';
 import {fetchScoutCreditSnapshot} from './finance-google.js';
 import {TEMPLATE_ROWS,TEMPLATE_META} from './finance-template.js';
 import {wizardSeedExpenses,validateWizardSettings,wizardPreview,wizardBudgetLines} from './budget-wizard.js';
@@ -303,6 +303,16 @@ async function handleAction(action,trigger){
    if(receipt?.items?.[i]&&askDelete('Remove this locally itemized receipt line?')){await put('receipts',{...receipt,items:receipt.items.filter((_,j)=>i!==j)});await refresh()}return;
   }
   case 'finance-tab':ui.financeTab=id;ui.financeForm='';ui.wizardStep=-1;render();return;
+  case 'finance-suggest-income':{
+   const year=activeYear(),existingIds=new Set(dbState.financeTags.map(t=>t.id));
+   const suggestions=dbState.financeLedger.filter(r=>scoutAccountYear(r)===year&&!existingIds.has(r.id))
+    .map(r=>({row:r,category:suggestLedgerIncome(r)})).filter(x=>x.category);
+   if(!suggestions.length){notify('No obvious deposits found for dues or donations. Review other deposits manually.');return;}
+   const summary=suggestions.slice(0,20).map(s=>(s.row.date||'')+' '+s.row.description+' '+money(s.row.credit)+' → '+s.category).join('\n');
+   if(!askDelete('REVIEW '+suggestions.length+' suggested income classifications.\n\n'+summary+(suggestions.length>20?'\n... plus '+(suggestions.length-20)+' more. Review manually if uncertain.':'')+'\n\nConfirm these are Pack income and NOT transfers, Scout credits, refunds or reimbursements? This only creates local category tags.'))return;
+   for(const s of suggestions)await put('financeTags',{id:s.row.id,kind:'income',category:s.category,eventId:'',reviewedAt:now(),source:'user-reviewed-suggestion'});
+   await refresh();notify(suggestions.length+' locally reviewed deposits classified as income');return;
+  }
   case 'finance-wizard-start':ui.financeTab='builder';ui.wizardStep=0;ui.wizardSource='template';ui.wizardConfig=null;ui.wizardExpenses=[];render();return;
   case 'finance-wizard-close':ui.wizardStep=-1;render();return;
   case 'finance-wizard-back':ui.wizardStep=Math.max(0,(ui.wizardStep??0)-1);render();return;
@@ -589,6 +599,12 @@ async function handleForm(form){
    const eventId=f('eventId'),event=dbState.events.find(e=>e.id===eventId);
     await put('financeReimbursements',{id:makeId(),requester:f('requester'),amount:Math.round(v*100)/100,date:f('date'),eventId:event?.id||'',eventTitle:event?.title||'',category:f('category'),notes:f('notes'),receiptId:f('receiptId'),sourceYear:activeYear(),status:'submitted',createdAt:now()});ui.reimbursementEventId='';break;
   }
+  case 'finance-donations':{
+   const value=Number(f('donations'));
+   if(f('donations')===''||!Number.isFinite(value)||value<0||value>1e8)throw Error('Enter a non-negative optional donation estimate');
+   await writeSetting('financeDonationEstimate:'+activeYear(),String(Math.round(value*100)/100));
+   await refresh();notify('Optional donation estimate saved; official ledger unchanged');return;
+  }
   case 'finance-fundraising':{
    const goal=Number(f('target')),rate=Number(f('rate')),members=Number(f('members'));
    if(!Number.isFinite(goal)||goal<0||goal>1e8||!Number.isFinite(rate)||rate<=0||rate>100||!Number.isInteger(members)||members<1||members>2000)throw Error('Enter a valid proceeds target, commission percentage and number of Scouts');
@@ -599,13 +615,14 @@ async function handleForm(form){
    for(const key of ['futureIncome','futureExpenses','reserve','restricted'])await writeSetting(({futureIncome:'financeFutureIncome',futureExpenses:'financeFutureExpenses',reserve:'financeReserve',restricted:'financeRestricted'})[key]+':'+activeYear(),f(key));break;
   }
   case 'finance-import-ledger':{
-   const file=form.elements.file.files?.[0];if(!file||file.size>3*1024*1024)throw Error('Select a ledger CSV smaller than 3 MB');
-   const rows=parseLedgerCsv(await file.text());
-   if(!askDelete(`Replace local treasurer ledger snapshot with ${rows.length} rows? The original Drive workbook is never edited.`))return;
-   for(const row of dbState.financeLedger.filter(r=>scoutAccountYear(r)===activeYear()))await remove('financeLedger',row.id);
-   for(const row of rows)await put('financeLedger',{...row,id:activeYear()==='2026-27'?row.id:activeYear()+':'+row.id,sourceYear:activeYear()});
-   await writeSetting('financeLedgerImportedAt:'+activeYear(),new Date().toISOString());
-   await refresh();notify(`${rows.length} treasurer ledger entries imported read-only`);return;
+   const file=form.elements.file.files?.[0];if(!file||file.size>3*1024*1024)throw Error('Select the treasurer ledger CSV under 3 MB. Export an Excel workbook as CSV first.');
+   const raw=parseLedgerCsv(await file.text()),review=ledgerImportReview(raw),year=activeYear();
+   const last=review.lastBalance===null?'Not included':money(review.lastBalance);
+   const audit=review.balanceWarnings.length?'\nWARNING: '+review.balanceWarnings.length+' running-balance discrepancies; check exported row order.':'';
+   if(!askDelete('TREASURER LEDGER IMPORT — '+year+'\n'+review.rows+' rows\nDeposits: '+money(review.deposits)+'\nWithdrawals: '+money(review.withdrawals)+'\nLatest listed balance: '+last+(review.lastBalanceDate?' ('+review.lastBalanceDate+')':'')+'\n\nDeposits include transfers and Scout-credit movements until reviewed. The official Drive ledger will NOT be edited.'+audit+'\n\nReplace only this year’s LOCAL ledger snapshot?'))return;
+   const next=raw.map(row=>({...row,id:year==='2026-27'?row.id:year+':'+row.id,sourceYear:year}));
+   await replaceAnnualLedger({previous:dbState.financeLedger.filter(r=>scoutAccountYear(r)===year),next,year,importedAt:new Date().toISOString()});
+   await refresh();ui.financeTab='ledger';render();notify('Ledger imported. Review deposits as dues, occasional donations, transfers or restricted credits.');return;
   }
   case 'finance-import-accounts':{
    const file=form.elements.file.files?.[0];if(!file||file.size>3*1024*1024)throw Error('Select a Scout credit CSV smaller than 3 MB');
