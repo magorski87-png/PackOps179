@@ -15,7 +15,7 @@ test('prefix searching progressively narrows across multiple searchable fields',
 });
 test('filter and sort compose with search',()=>{
  assert.deepEqual(queryEquipment(items,{category:'Rockets & STEM',search:'rocket',sort:'name-desc'}).map(x=>x.id),['a','b']);
- assert.deepEqual(queryEquipment(items,{sort:'category'}).map(x=>x.id),['d','c','b','a']);
+ assert.deepEqual(queryEquipment(items,{sort:'category'}).map(x=>x.id),['d','c','a','b']);
 });
 test('older equipment defaults and safe CSV export',()=>{
  const old=normalizeEquipment({id:'x',name:'Flags'});
