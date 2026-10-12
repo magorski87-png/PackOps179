@@ -51,8 +51,8 @@ export function parseScoutCreditsCsv(content,annualDues){
   const r=rows[i],first=rowValue(r,headers,'first name'),last=rowValue(r,headers,'last name');
   if(!first&&!last){if(r.some(v=>String(v).trim()))continuation++;continue;}
   if(!first||!last)continue;
-  const carryover=amount(rowValue(r,headers,'2025-26 carryover','carryover'));
-  const earnings=amount(rowValue(r,headers,'2026-27 popcorn earnings','popcorn earnings'));
+  const carryover=amount(rowValue(r,headers,...headers.filter(h=>h.includes('carryover')),'carryover'));
+  const earnings=amount(rowValue(r,headers,...headers.filter(h=>h.includes('popcorn earnings')),'popcorn earnings'));
   const rawBalance=rowValue(r,headers,'positive credit or dues owed','balance','credit balance');
   const balance=rawBalance===''?null:amount(rawBalance),den=rowValue(r,headers,'den');
   const predicted=round(carryover+earnings-annualDues);
