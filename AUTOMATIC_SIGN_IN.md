@@ -1,8 +1,8 @@
 # Automatic PackOps Google sign-in
 
-Implementation is on a separate branch. Do not merge/deploy until the three public
-values below are confirmed and the release checks pass. No database migration or
-data import is needed for this change.
+Implementation is on a separate branch with the owner's public configuration supplied.
+Do not merge/deploy without production approval and passing release checks.
+No database migration or data import is needed for this change.
 
 ## One-time configuration (Pack administrator)
 
@@ -17,8 +17,11 @@ select id, name from public.packs order by name;
 ```
 
 Choose the row for Pack 179. If multiple rows match, confirm the one containing your
-existing records and membership before publishing. No UUID is currently recorded
-in this repository, so the implementation intentionally leaves all three values blank.
+existing records and membership before publishing. The owner confirmed Pack UUID
+`bcf48631-8f33-4c66-b1ca-1573c769fd1b` on October 13, 2026. The public project URL
+and publishable key supplied by the owner are now in cloud-config.js. The URL uses
+the project origin, without the `/rest/v1/` API path. This confirmation is from the
+owner; no privileged database lookup was performed.
 
 Only public connection identifiers belong in cloud-config.js. Google OAuth Client
 Secret stays in Supabase Authentication's Google provider. Never put secret/service-role
