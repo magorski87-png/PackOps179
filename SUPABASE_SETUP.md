@@ -21,7 +21,7 @@ Save the returned **Pack UUID**.
 2. Under the OAuth client's **Authorized redirect URIs**, enter your exact Supabase callback, typically `https://<your-project-ref>.supabase.co/auth/v1/callback`. Copy this from Supabase → Authentication → Providers → Google.
 3. In Supabase → Authentication → Providers → Google, enable Google and enter its OAuth **Client ID and Client Secret** into the protected Supabase dashboard, never the GitHub repository.
 4. In Supabase → Authentication → URL Configuration, set the Site URL to `https://magorski87-png.github.io/PackOps179/` and add it to **Redirect URLs**.
-5. In PackOps **Settings**, enter the **Supabase Project URL**, **Supabase publishable/anon key**, and **Pack UUID**. Click **Connect to Pack backend**, then **Continue with Google**.
+5. Configure the website once using **[Automatic sign-in setup](AUTOMATIC_SIGN_IN.md)** and the public values in section 3. All leaders then use **Continue with Google** without backend setup. Existing manually configured devices remain supported.
 6. Your first login will be authenticated but unapproved. This is intentional. Go to Supabase → Authentication → Users and locate YOUR newly created user UUID.
 7. **One-time privileged admin bootstrap** in the Supabase SQL Editor only:
 
@@ -52,7 +52,7 @@ export const PACK_CLOUD_CONFIG={
 };
 ```
 
-Commit/deploy this file. The public key is NOT a secret; it is safe in a browser **only if the migration's table privileges and Row Level Security have been applied**. Never use a privileged Supabase key here. After this commit, authorized leaders on new devices and parents with private `#family/<token>` links can reach the same backend without manually entering connection information.
+Run `npm test` and `npm run build:production`, then obtain production deployment approval before merging this file. The public key is NOT a secret; it is safe in a browser **only if the migration's table privileges and Row Level Security have been applied**. Never use a privileged Supabase key here. After this commit, authorized leaders on new devices and parents with private `#family/<token>` links can reach the same backend without manually entering connection information.
 
 ## 4. Deploy the family RSVP/email Edge Function
 

@@ -15,6 +15,7 @@ import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from '
 import {normalizeGoogleConfiguration} from './google-config.js';
 import {EQUIPMENT_CATEGORIES,normalizeEquipment,queryEquipment,equipmentCsv} from './equipment-utils.js';
 import {PACK_CLOUD_CONFIG} from './cloud-config.js';
+import {resolveCloudConfiguration,hasCloudConfiguration} from './cloud-config-validation.js';
 import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,watchCloudChanges,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest,fetchPackSettings,savePackSetting} from './cloud.js';
 import {cloudSettingsPanel} from './cloud-panel.js';
 import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
@@ -33,8 +34,8 @@ async function writeSetting(key,value){
  if(cloudActive()&&isShared&&['admin','cubmaster','treasurer'].includes(cloudState().member.role))await savePackSetting(key,value);
  return localWriteSetting(key,value);
 }
-const cloudSettings=()=>({projectUrl:settings('supabaseUrl')||PACK_CLOUD_CONFIG.projectUrl,publishableKey:settings('supabasePublishableKey')||PACK_CLOUD_CONFIG.publishableKey,packId:settings('supabasePackId')||PACK_CLOUD_CONFIG.packId});
-const cloudConfigured=()=>Boolean(cloudSettings().projectUrl);
+const cloudSettings=()=>resolveCloudConfiguration(PACK_CLOUD_CONFIG,{projectUrl:settings('supabaseUrl'),publishableKey:settings('supabasePublishableKey'),packId:settings('supabasePackId')});
+const cloudConfigured=()=>hasCloudConfiguration(cloudSettings());
 async function put(table,row){
  if(cloudActive()&&table==='tasks'&&cloudState().member?.role==='den_leader'&&!row.den){
   row={...row,den:ui.denChoice||cloudState().member.den_scopes?.[0]||''};
@@ -74,7 +75,7 @@ async function replaceAnnualLedger({previous=[],next=[],year,importedAt}){
  await writeSetting('financeLedgerImportedAt:'+year,importedAt);
 }
 async function setupCloud(){
- const cfg=cloudSettings();if(!cfg.projectUrl)return;
+ const cfg=cloudSettings();if(!hasCloudConfiguration(cfg))return;
  try{await configureCloud({projectUrl:cfg.projectUrl,publishableKey:cfg.publishableKey,pack:cfg.packId});ui.cloudError='';ensureRealtime();}
  catch(e){ui.cloudError=e.message;console.error('PackOps Cloud setup',e)}
 }
@@ -436,6 +437,7 @@ async function handleAction(action,trigger){
  const id=trigger.dataset.id;
  switch(action){
   case 'cloud-sign-in':await googleCloudLogin();return;
+  case 'cloud-retry':await setupCloud();await refresh();return;
   case 'cloud-sign-out':await googleCloudLogout();ui.cloudMembers=[];ui.cloudInvites=[];await refresh();route('settings');return;
   case 'cloud-refresh':await syncCloudIdentity();ensureRealtime();await loadCloudAdmin();await loadFamilyForms();await refresh();notify('Shared data refreshed from Supabase');return;
   case 'cloud-migrate':{
@@ -719,6 +721,7 @@ async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
   case 'cloud-config':{
+   if(cloudSettings().managed)throw Error('The Pack backend is managed by the website administrator.');
    const projectUrl=f('projectUrl'),publishableKey=f('publishableKey'),packId=f('packId');
    if(/service_role|sb_secret_/i.test(publishableKey))throw Error('Never enter a Supabase secret key in a browser');
    await configureCloud({projectUrl,publishableKey,pack:packId});
