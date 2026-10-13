@@ -1,5 +1,11 @@
 # PackOps 179 v0.6 — Secure shared workspace setup
 
+**Existing installations:** use [AUTOMATIC_SETUP.md](AUTOMATIC_SETUP.md) to publish
+your existing public connection settings once. Do not recreate the Pack or repeat
+the admin bootstrap. Leaders then only use **Continue with Google**. Leader
+approval does not send email unless the optional server email sender is configured
+and the administrator explicitly selects it.
+
 The GitHub Pages frontend is deployable without access to secrets. Shared Pack records remain **disabled until you finish this setup**. Existing v0.5 records are left in their original local IndexedDB and are NOT automatically uploaded.
 
 ## 1. Create a Pack-controlled Supabase project

@@ -1,23 +1,22 @@
 // PackOps v0.6 shared backend. Browser gets ONLY Supabase publishable/anon key.
 // Never put service_role keys, Google OAuth secrets or email credentials here.
+import {normalizeCloudConfig} from './cloud-config-utils.js';
 export const SHARED_TABLES=['events','tasks','equipment','roster','budget','financeLedger','financeAccounts','financeAdjustments','financeReimbursements','financeTags','financeAudit','receipts','denPlans','adventureProgress','attendance'];
 export const CLOUD_ROLES=['admin','cubmaster','treasurer','den_leader','volunteer'];
-let client=null,packId='',user=null,member=null,url='';
+let client=null,packId='',user=null,member=null,url='',clientKey='';
 let remoteLoad=null;let changesChannel=null;
 export function cloudState(){return {configured:!!client,packId,authenticated:!!user,member,user:{email:user?.email||'',id:user?.id||''},url};}
 export function sharedTable(name){return SHARED_TABLES.includes(name)}
 const fail=({error},context)=>{if(error)throw Error(context+': '+error.message);};
 export async function configureCloud({projectUrl,publishableKey,pack}){
- const endpoint=new URL(String(projectUrl||'').trim());
- if(endpoint.protocol!=='https:'||(!endpoint.hostname.endsWith('.supabase.co')&&!endpoint.hostname.endsWith('.supabase.in')))throw Error('Use the HTTPS Supabase project URL from Project Settings.');
- if(!publishableKey?.trim())throw Error('Enter the Supabase publishable / anon key (never the secret or service_role key).');
- if(/service_role|sb_secret_/i.test(publishableKey))throw Error('Never enter a Supabase secret key in the website.');
- if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pack||''))throw Error('Enter the Pack UUID from the secure Supabase setup instructions.');
+ const cfg=normalizeCloudConfig({projectUrl,publishableKey,packId:pack});
  if(!remoteLoad)remoteLoad=import('https://esm.sh/@supabase/supabase-js@2.76.1').catch(e=>{remoteLoad=null;throw Error('Could not load Supabase library. '+e.message)});
  const {createClient}=await remoteLoad;
- if(client&&url===endpoint.origin&&packId===pack){return syncCloudIdentity()}
- client=createClient(endpoint.origin,publishableKey.trim(),{auth:{flowType:'pkce',autoRefreshToken:true,persistSession:true,detectSessionInUrl:true}});
- url=endpoint.origin;packId=pack;return syncCloudIdentity();
+ if(client&&url===cfg.projectUrl&&packId===cfg.packId&&clientKey===cfg.publishableKey){return syncCloudIdentity()}
+ await stopCloudChanges();
+ client?.auth.stopAutoRefresh();user=null;member=null;
+ client=createClient(cfg.projectUrl,cfg.publishableKey,{auth:{flowType:'pkce',autoRefreshToken:true,persistSession:true,detectSessionInUrl:true}});
+ url=cfg.projectUrl;packId=cfg.packId;clientKey=cfg.publishableKey;return syncCloudIdentity();
 }
 export async function syncCloudIdentity(){
  if(!client)return cloudState();
@@ -77,12 +76,19 @@ export async function migrateLocalRecords(localData){
 }
 export async function listMembers(){requireMember();const res=await client.from('pack_members').select('user_id,role,den_scopes,status,created_at').eq('pack_id',packId);fail(res,'Leader access');return res.data||[]}
 export async function listInvites(){requireMember();const res=await client.from('member_invites').select('email,role,den_scopes,created_at').eq('pack_id',packId);fail(res,'Pending invites');return res.data||[]}
-export async function addLeaderInvite({email,role,denScopes=[]}){
+export async function addLeaderInvite({email,role,denScopes=[],sendEmail=false}){
  requireMember();if(!['admin','cubmaster'].includes(member.role))throw Error('Only Pack admins may invite leaders');
  if(!/^\S+@\S+\.\S+$/.test(email))throw Error('Use an email address');
  if(!CLOUD_ROLES.includes(role))throw Error('Unknown role');
  const res=await client.from('member_invites').upsert({pack_id:packId,email:email.trim().toLowerCase(),role,den_scopes:denScopes},{onConflict:'pack_id,email'});
  fail(res,'Inviting leader');
+ if(!sendEmail)return {emailStatus:'not-requested'};
+ // Approval is already saved through RLS. Delivery failure must not undo it.
+ try{
+  const {data,error}=await client.functions.invoke('leader-invite',{body:{packId,email:email.trim().toLowerCase()}});
+  if(error||data?.emailStatus!=='accepted')return {emailStatus:'failed',emailError:data?.emailError||'Email was not confirmed. Ask the administrator to check the leader-invite function and email provider configuration. Share the PackOps link manually.'};
+  return data;
+ }catch{return {emailStatus:'failed',emailError:'Email service could not be reached. Approval is saved; share the PackOps link manually.'}}
 }
 export async function updateLeaderRole(uid,role,denScopes,status='active'){
  requireMember();if(!['admin','cubmaster'].includes(member.role))throw Error('Only Pack admins may change permissions');

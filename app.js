@@ -15,6 +15,7 @@ import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from '
 import {normalizeGoogleConfiguration} from './google-config.js';
 import {EQUIPMENT_CATEGORIES,normalizeEquipment,queryEquipment,equipmentCsv} from './equipment-utils.js';
 import {PACK_CLOUD_CONFIG} from './cloud-config.js';
+import {hasCloudConfig,resolveCloudConfig} from './cloud-config-utils.js';
 import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,watchCloudChanges,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest,fetchPackSettings,savePackSetting} from './cloud.js';
 import {cloudSettingsPanel} from './cloud-panel.js';
 import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
@@ -33,8 +34,8 @@ async function writeSetting(key,value){
  if(cloudActive()&&isShared&&['admin','cubmaster','treasurer'].includes(cloudState().member.role))await savePackSetting(key,value);
  return localWriteSetting(key,value);
 }
-const cloudSettings=()=>({projectUrl:settings('supabaseUrl')||PACK_CLOUD_CONFIG.projectUrl,publishableKey:settings('supabasePublishableKey')||PACK_CLOUD_CONFIG.publishableKey,packId:settings('supabasePackId')||PACK_CLOUD_CONFIG.packId});
-const cloudConfigured=()=>Boolean(cloudSettings().projectUrl);
+const cloudSettings=()=>resolveCloudConfig(PACK_CLOUD_CONFIG,{projectUrl:settings('supabaseUrl'),publishableKey:settings('supabasePublishableKey'),packId:settings('supabasePackId')});
+const cloudConfigured=()=>hasCloudConfig(cloudSettings());
 async function put(table,row){
  if(cloudActive()&&table==='tasks'&&cloudState().member?.role==='den_leader'&&!row.den){
   row={...row,den:ui.denChoice||cloudState().member.den_scopes?.[0]||''};
@@ -74,7 +75,7 @@ async function replaceAnnualLedger({previous=[],next=[],year,importedAt}){
  await writeSetting('financeLedgerImportedAt:'+year,importedAt);
 }
 async function setupCloud(){
- const cfg=cloudSettings();if(!cfg.projectUrl)return;
+ const cfg=cloudSettings();if(!hasCloudConfig(cfg))return;
  try{await configureCloud({projectUrl:cfg.projectUrl,publishableKey:cfg.publishableKey,pack:cfg.packId});ui.cloudError='';ensureRealtime();}
  catch(e){ui.cloudError=e.message;console.error('PackOps Cloud setup',e)}
 }
@@ -389,7 +390,7 @@ function library(){
  <div class="library-grid">${all.map(item=>`<div class="link-tile"><span class="link-icon">${item.emoji}</span><div style="flex:1;min-width:0"><strong>${esc(item.label)}</strong><small>${esc(item.description||'')}</small><div class="task-options">${link(item.url,'Open','btn btn-small')}${item.fixed?'':btn('Remove','delete-bookmark','btn btn-ghost btn-small',`data-id="${item.id}"`)}</div></div></div>`).join('')}</div>`;
 }
 function settingsPage(){
- const panel=cloudSettingsPanel({state:cloudState(),configured:cloudSettings(),setupError:ui.cloudError,members:ui.cloudMembers,invites:ui.cloudInvites,esc,btn,field,select,note});
+ const panel=cloudSettingsPanel({state:cloudState(),configured:cloudSettings(),setupError:ui.cloudError,invitationNotice:ui.leaderInviteNotice||'',members:ui.cloudMembers,invites:ui.cloudInvites,esc,btn,field,select,note});
  if(cloudConfigured()&&!cloudActive())return `${intro('Private Pack data','Security & Google login','Sign in with an approved Pack Google account to access PackOps.')}${panel}`;
  return `${panel}${intro('Your device and Drive','Settings','Local privacy controls and optional, user-authorized Google Drive receipt uploads.')}
  <div class="split"><section class="panel stack"><h2>Connect Google services</h2><p>For receipt uploads, enable Drive API and Picker API. For upcoming events, enable Google Calendar API and grant calendar.readonly access. Use a Google OAuth Web Client ID authorized for your PackOps website. Tokens stay in memory; never enter client secrets.</p><p>Calendar connection status: <strong>${calendarConnected()?'Authorized for this session':'Not connected'}</strong>. Open Pack Calendar to select a calendar.</p>
@@ -719,6 +720,7 @@ async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
   case 'cloud-config':{
+   if(cloudSettings().managed)throw Error('This website is already configured by the Pack administrator.');
    const projectUrl=f('projectUrl'),publishableKey=f('publishableKey'),packId=f('packId');
    if(/service_role|sb_secret_/i.test(publishableKey))throw Error('Never enter a Supabase secret key in a browser');
    await configureCloud({projectUrl,publishableKey,pack:packId});
@@ -728,8 +730,9 @@ async function handleForm(form){
   }
   case 'cloud-invite-leader':{
    const denScopes=f('dens').split(',').map(x=>x.trim()).filter(Boolean);
-   await addLeaderInvite({email:f('email'),role:f('role'),denScopes});
-   await loadCloudAdmin();render();notify('Leader invitation approved. Ask that leader to sign into PackOps with this email.');return;
+   const result=await addLeaderInvite({email:f('email'),role:f('role'),denScopes,sendEmail:form.elements.sendEmail?.checked||false});
+   ui.leaderInviteNotice=result.emailStatus==='accepted'?'Approval saved. Email accepted by the sending provider; inbox delivery is not yet confirmed.':result.emailStatus==='failed'?'Approval saved, but email delivery was not confirmed: '+result.emailError:'Approval saved. No email was requested. Share the PackOps website link and ask the leader to Continue with Google using this email.';
+   await loadCloudAdmin();render();notify(ui.leaderInviteNotice);return;
   }
   case 'family-form-create':{
    if(!cloudActive())throw Error('Sign in and activate the Pack shared database first');
@@ -747,7 +750,7 @@ async function handleForm(form){
    ui.familyLink=result.url;
    ui.familyResults=await getFamilyResponses(f('formId'));
    render();
-   notify(result.emailed?'Invitation email sent':'Private link generated. Copy it and share with the intended household.');return;
+   notify(result.emailed?'Email accepted by the sending provider; inbox delivery is not yet confirmed.':result.emailError||'Private link generated. Copy it and share with the intended household.',Boolean(result.emailError));return;
   }
   case 'family-public-response':{
    if(!ui.familyToken)throw Error('Open a private invitation link first');

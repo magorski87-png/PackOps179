@@ -145,4 +145,11 @@ A Google Cloud consent screen may require configuration/verification for third-p
 - `app.js`: Integration with buttons, forms, receipt itemization, PWA install and calendar shortcut.
 - `styles.css`: Mobile/desktop Finance layout.
 - `tests/`: 23+ automated tests using fictional data.
-- `.github/workflows/deploy.yml`: test/build/deploy on push to main.
+- `.github/workflows/validate.yml`: test/build on pull requests and main.
+- `.github/workflows/deploy-pages.yml`: deliberate manual deployment from main.
+
+## Staged automatic cloud configuration
+
+See [AUTOMATIC_SETUP.md](AUTOMATIC_SETUP.md) for one-time public backend configuration,
+the manual deployment workflow, leader invitation email, and new-device verification.
+The deployed backend values must be confirmed before release.
