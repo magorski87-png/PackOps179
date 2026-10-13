@@ -119,6 +119,10 @@ export function watchCloudChanges(callback){
  if(changesChannel)return;
  changesChannel=client.channel('packops-records-'+packId).on('postgres_changes',{
   event:'*',schema:'public',table:'pack_records',filter:'pack_id=eq.'+packId
+ },()=>callback()).on('postgres_changes',{
+  event:'*',schema:'public',table:'finance_notifications',filter:'pack_id=eq.'+packId
+ },()=>callback()).on('postgres_changes',{
+  event:'*',schema:'public',table:'finance_requests',filter:'pack_id=eq.'+packId
  },()=>callback()).subscribe();
 }
 export async function stopCloudChanges(){
@@ -138,3 +142,51 @@ export async function savePackSetting(key,value){
  if(!(key==='activeScoutYear'||key.startsWith('finance')))throw Error('This setting is personal to this device, not shared');
  fail(await client.from('pack_settings').upsert({pack_id:packId,setting_key:key,setting_value:String(value)},{onConflict:'pack_id,setting_key'}),'Saving Pack finance setting');
 }
+export async function replaceCloudLedgerSnapshot(year,rows,importedAt){
+ requireMember();
+ const result=await client.rpc('pack_replace_ledger_snapshot',{p_pack:packId,p_year:year,p_rows:rows,p_imported_at:importedAt});
+ fail(result,'Refreshing reviewed ledger snapshot');return result.data;
+}
+
+async function workflowInvoke(name,body){
+ requireMember();
+ const {data,error}=await client.functions.invoke(name,{body:{...body,packId}});
+ if(error){
+  let detail='';try{detail=(await error.context?.json())?.error||''}catch{}
+  throw Error(detail||'This service is unavailable. Ask the Pack administrator to check its deployment and configuration.');
+ }
+ if(data?.error)throw Error(data.error);return data;
+}
+export async function loadTransactionWorkflow(){
+ requireMember();
+ const readAll=async(table,order,ascending=true,filter=null)=>{
+  const rows=[];
+  for(let from=0;from<100000;from+=500){
+   let query=client.from(table).select('*').eq('pack_id',packId).order(order,{ascending}).range(from,from+499);
+   if(filter)query=query.eq('user_id',filter);
+   const result=await query;
+   if(result.error)return {rows,error:result.error};
+   rows.push(...(result.data||[]));if((result.data||[]).length<500)break;
+  }
+  return {rows};
+ };
+ const requests=await readAll('finance_requests','created_at',false);
+ if(requests.error){
+  if(['42P01','PGRST205'].includes(requests.error.code))return {available:false,requests:[],audit:[],notifications:[],error:'The secure transaction workflow needs the one-time backend update.'};
+  fail(requests,'Transaction requests');
+ }
+ const audit=await readAll('finance_request_audit','id');fail(audit,'Transaction audit');
+ const notifications=await readAll('finance_notifications','created_at',true,user.id);fail(notifications,'Review notifications');
+ return {available:true,requests:requests.rows,audit:audit.rows,notifications:notifications.rows};
+}
+export async function submitTransaction(id,data){
+ requireMember();const result=await client.rpc('pack_submit_transaction',{p_pack:packId,p_id:id,p_data:data});fail(result,'Submitting transaction');return result.data;
+}
+export async function reviewTransaction(id,version,action,note){
+ requireMember();const result=await client.rpc('pack_review_transaction',{p_pack:packId,p_id:id,p_version:version,p_action:action,p_note:note});fail(result,'Reviewing transaction');return result.data;
+}
+export const notifyTransaction=id=>workflowInvoke('finance-workflow',{action:'notify',requestId:id});
+export const postTransaction=id=>workflowInvoke('finance-workflow',{action:'post',requestId:id});
+export const fetchOfficialLedger=year=>workflowInvoke('finance-workflow',{action:'snapshot',year});
+export const sendLeaderInvite=email=>workflowInvoke('leader-invite',{email});
+export async function markTransactionNotificationsRead(){requireMember();fail(await client.rpc('pack_mark_finance_notifications_seen',{p_pack:packId}),'Reading notifications')}

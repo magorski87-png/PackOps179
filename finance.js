@@ -32,7 +32,10 @@ export function parseLedgerCsv(content){
   if(!finiteMoney(Math.abs(out))||!finiteMoney(Math.abs(input)))throw Error('Transaction amount out of allowed range on row '+(i+1));
   const key=[date,normal(description),out,input,rawBalance].join('|');
   const duplicateIndex=(taken.get(key)||0)+1;taken.set(key,duplicateIndex);
-  const id=`ledger:${key}:${duplicateIndex}`;
+  const postingId=rowValue(r,headers,'packops id');
+  if(postingId&&!/^[0-9a-f-]{36}$/i.test(postingId))throw Error('Invalid PackOps ID on ledger row '+(i+1));
+  const id=postingId?'packops:'+postingId:`ledger:${key}:${duplicateIndex}`;
+  if(parsed.some(row=>row.id===id))throw Error('Duplicate PackOps ID in ledger. Resolve it in the official ledger before importing.');
   const shortDate=/^\d{4}-\d{2}-\d{2}/.exec(date)?.[0]||'';
   const starting=/starting balance|opening balance/i.test(description);
   parsed.push({id,description,date:shortDate,debit:round(out),credit:round(input),balance:rawBalance!==''?amount(rawBalance):null,isOpening:starting,sourceRow:i+1,source:'Treasurer ledger CSV'});

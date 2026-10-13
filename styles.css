@@ -158,3 +158,12 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .equipment-controls .input{min-height:43px}
 @media(max-width:800px){.equipment-controls{grid-template-columns:1fr 1fr}.equipment-controls .field:first-child{grid-column:1/-1}}
 @media(max-width:540px){.equipment-controls{grid-template-columns:1fr}.equipment-controls .field:first-child{grid-column:auto}}
+
+/* Fit finance summaries to their panel, including narrow desktop split columns. */
+.finance-metrics{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
+.finance-kpi strong{font-size:clamp(1rem,1.8vw,1.4rem);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.wizard-expense-row{display:grid;grid-template-columns:1fr 1.5fr minmax(110px,.7fr) auto;gap:12px;align-items:end;padding:12px 0;border-bottom:1px solid var(--cub-border)}
+.recipient-list{max-height:320px;overflow:auto;display:grid;gap:10px}
+.recipient-choice{display:flex;gap:10px;align-items:start;padding:10px;border-bottom:1px solid var(--cub-border)}
+.message-preview{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;background:#f3f6fa;padding:16px;border-radius:10px}
+@media(max-width:650px){.wizard-expense-row{grid-template-columns:1fr 1fr}.wizard-expense-row .field:nth-child(2){grid-column:1/-1}.finance-kpi{min-height:0}}

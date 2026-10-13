@@ -2,7 +2,7 @@
 
 ## Principles
 
-1. **Official Google Drive files remain the source of truth.** PackOps never rewrites the treasurer's financial ledger or individual Scout credit Google Sheet without an explicitly authorized future sync/write feature.
+1. **Official Google Drive files remain the source of truth.** PackOps appends a reviewed transaction to the official ledger only after the native Google Sheet bridge has been deliberately configured and a finance reviewer confirms Post. Scout credits are never written by PackOps.
 2. **Every mutable local record can be preserved in an encrypted restore point.** In Settings → Encrypted Backup & Rebuild, choose Download or an explicitly selected Drive backup folder. No background sync exists yet.
 3. **Store encrypted backups in a restricted Pack Drive folder.** The application cannot verify folder sharing restrictions and cannot recover a lost passphrase. Never commit Scout data, ledger exports, backups, or private receipts to GitHub.
 4. **Different devices are not live-synchronized.** Restore is a point-in-time replacement, not a merge. Back up before clearing storage, installing on another device, or changing browsers. Don't make simultaneous edits to two unsynchronized copies.
@@ -46,7 +46,7 @@ Alternatively choose **Download encrypted backup** and manually place it in your
 5. Reconnect Google Calendar and Google Drive. These authorizations and API configuration are intentionally not backed up.
 6. Refresh authoritative source data if the treasurer, Scout-credit Sheet, or calendar changed after the backup.
 
-**Recovery limitations:** There is no automatic background backup, no multi-person authentication, no real-time cross-device editing, no Google Sheet two-way synchronization, and no automatic conflict resolution in this version. Full, secure multi-leader sync requires a protected backend with role-based authorization and an auditable sync protocol.
+**Recovery limitations:** There is no automatic background backup or automatic conflict resolution. A local restore does not overwrite Supabase transaction requests, audit history, or the Google ledger. Use independent Supabase backups for server recovery; the encrypted export preserves a readable archive for review, not a direct server restore.
 
 ## Restore integrity and privacy
 

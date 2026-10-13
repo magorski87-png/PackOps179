@@ -5,7 +5,7 @@ The GitHub Pages frontend is deployable without access to secrets. Shared Pack r
 ## 1. Create a Pack-controlled Supabase project
 
 - Create a Supabase project in an appropriate **US hosting region**, owned by a Pack-controlled administrative account with a second trusted Pack administrator.
-- Use the **SQL Editor** to run, IN FILENAME ORDER, every SQL file under `supabase/migrations/` (001 through 007).
+- Use the **SQL Editor** to run, IN FILENAME ORDER, every SQL file under `supabase/migrations/` (001 through 008). Migration 008 adds the reviewed Finance transaction workflow described in [FINANCE_WORKFLOW_SETUP.md](FINANCE_WORKFLOW_SETUP.md).
 - Note the project's URL and its **publishable key** from Supabase Project Settings. These identifiers are intended for a browser with RLS enabled. **Never** paste or commit a `service_role` key, `sb_secret_` key, Google OAuth client secret, or Resend API key.
 - In the SQL Editor create the Pack itself (this is an example, not executed automatically):
 
@@ -122,9 +122,9 @@ These tests MUST be done with a real project; passing the repository's Node test
 ## Current limitations and next hardening
 
 - Offline access to approved cloud records is **not** a production-grade queued sync mechanism. Do not assume offline writes are sent later.
-- Cloud budget/ledger bulk replacement currently uses individual protected operations, not one all-or-nothing database transaction. Import/export backup first and verify results after interruptions.
+- Cloud **budget** bulk replacement still uses individual protected operations. The new ledger snapshot replacement uses one checked database transaction; take a backup before a reviewed import and check its results.
 - Google Drive/Calendar authorizations are per Google account/device and continue to use their existing authorization flows.
-- Individual volunteer capacity enforcement, multi-question surveys, live Scoutbook advancement writes, automatic ledger fetch, SMS, push notifications, and automatic archival/retention jobs require later work.
+- Individual volunteer capacity enforcement, multi-question surveys, live Scoutbook advancement writes, SMS, push notifications, and automatic archival/retention jobs require later work. Automatic ledger refresh and posting require the separate native Sheet bridge configuration in the Finance setup guide.
 - Cloud youth records are not stored in public assets; however previously imported v0.5 local copies still reside in that browser until expressly cleared. Use a trusted device and established retention policy.
 
 The v0.6 frontend can be deployed immediately; **the real cloud service is not live until Supabase is provisioned and the SQL migrations, Google provider, key configuration, and Edge Function are deployed and verified**.

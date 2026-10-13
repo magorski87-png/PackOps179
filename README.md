@@ -1,3 +1,11 @@
+# PackOps 179 — Finance and leader workflow update (review branch)
+
+This branch adds editable budget allocations, filtered Scout-account proposals, individual-family invitation preview, direct event-lead editing, and more reliable phone attachments. Finance now has a protected transaction screen with submit, reviewer approval, payment verification, audit history and an optional verified ledger bridge. The entry fields match Courtney's observed ledger columns. An official ledger write requires the separate reviewed native Google Sheet, server configuration and an explicit reviewer action. The source Excel workbook is not silently converted. See [Finance workflow setup](FINANCE_WORKFLOW_SETUP.md) for the release checks and needed information. The published website remains on its current version until this branch is deliberately merged.
+
+`npm ci`, `npm test` and `npm run build:production` validate this code. Backend migration 008 and the Edge Functions must be installed before the secure transaction screen can accept entries. No privileged key is bundled with GitHub Pages.
+
+---
+
 # PackOps v0.6 — Secure Shared Workspace & Family Responses
 
 This release adds **equipment search, category filters, editing, quantities and CSV export**, a **Den Leader meeting/adventure workspace**, a **family RSVP, poll and volunteer response portal**, plus source code for **Supabase Google login, approved users, den-restricted database records, shared finances, Real-time update signals, audit history, private receipts metadata and encrypted administrator backups**.

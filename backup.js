@@ -42,7 +42,7 @@ async function keyFor(passphrase,salt,usage){
  const material=await crypto.subtle.importKey('raw',encoder.encode(passphrase),'PBKDF2',false,['deriveKey']);
  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,[usage]);
 }
-export async function createEncryptedBackup(passphrase,sharedSnapshot=null){
+export async function createEncryptedBackup(passphrase,sharedSnapshot=null,cloudWorkflow=null){
  const tables={};
  for(const table of TABLES){
   const records=sharedSnapshot&&Object.hasOwn(sharedSnapshot,table)?sharedSnapshot[table]:await list(table);
@@ -50,7 +50,7 @@ export async function createEncryptedBackup(passphrase,sharedSnapshot=null){
   const filtered=table==='settings'?records.filter(r=>!/^google(ClientId|ApiKey|Folder|FolderName|BackupFolder|BackupFolderName)$/.test(r.key)):records;
   tables[table]=await serialize(filtered);
  }
- const payload=encoder.encode(JSON.stringify({kind:KIND,version:VERSION,createdAt:new Date().toISOString(),tables}));
+ const payload=encoder.encode(JSON.stringify({kind:KIND,version:VERSION,createdAt:new Date().toISOString(),tables,cloudWorkflow:cloudWorkflow?await serialize(cloudWorkflow):null}));
  if(payload.byteLength>limits.maxBackupBytes)throw Error('Backup exceeds 150 MB; move large attachments into Drive first');
  const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
  const key=await keyFor(passphrase,salt,'encrypt');
