@@ -77,7 +77,7 @@ A mobile-first, installable leadership PWA for Pack 179. Public app code; **Pack
 
 ## Source-of-truth policy
 
-1. **Official treasurer ledger**: https://docs.google.com/spreadsheets/d/1tETtLSogYC3RFvHj_uDbAxgyGu9QcqXO/edit
+1. **Official treasurer ledger**: https://docs.google.com/spreadsheets/d/1d9_8y2fWBwj4wOXIZcsWsFQXYRoGj3ShOJgPwWL3C00/edit (native Google Sheet; original Excel file is archived and backed up)
 2. **Individual Scout credits**: https://docs.google.com/spreadsheets/d/1ttivHLcq0bopzuKJrlUM1farkG287dM1Krts3Q-NZYQ/edit
 3. **Budget Planner template**: Planning structure, *not* an authoritative balance.
 4. **PackOps**: Locally saved planning, categorization, receipt intake, reimbursement queue, and reports based on imported snapshots. Never writes to the official ledger or Scout-credit sheet.

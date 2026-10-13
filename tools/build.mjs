@@ -1,0 +1,13 @@
+import {mkdir,copyFile,rm} from 'node:fs/promises';
+import {PACK_CLOUD_CONFIG} from '../cloud-config.js';
+import {validateCloudConfiguration} from '../cloud-config-validation.js';
+const cloud=validateCloudConfiguration(PACK_CLOUD_CONFIG,{allowEmpty:!process.argv.includes('--require-cloud')});
+if(!cloud)console.warn('Shared backend not configured: local/manual compatibility build only. Run npm run build:production before release.');
+import path from 'node:path';
+const root=path.resolve(import.meta.dirname,'..');
+const out=path.join(root,'dist');
+const files=["index.html","styles.css","app.js","data.js","db.js","drive.js","roster-import.js","calendar-api.js","calendar-import.js","finance.js","finance-ui.js","finance-google.js","finance-template.js","pack-config.js","backup.js","settings-actions.js","event-sync.js","budget-wizard.js","budget-wizard-ui.js","finance-insights.js","google-config.js","equipment-utils.js","roster-sync.js","finance-editing.js","family-invitations.js","attachments.js","transaction-workflow.js","transaction-ui.js","cloud-config.js","cloud-config-validation.js","cloud.js","cloud-panel.js","family-ui.js","workspace-v06-ui.js","sw.js","manifest.webmanifest","icon.svg","icon-192.png","icon-512.png"];
+await rm(out,{recursive:true,force:true});
+await mkdir(out,{recursive:true});
+for(const file of files)await copyFile(path.join(root,file),path.join(out,file));
+console.log(`PackOps built: ${files.length} static files → dist/`);
