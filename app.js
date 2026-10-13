@@ -15,6 +15,7 @@ import {saveYearConfiguration,exportPackOpsBackup,restorePackOpsFromFile} from '
 import {normalizeGoogleConfiguration} from './google-config.js';
 import {EQUIPMENT_CATEGORIES,normalizeEquipment,queryEquipment,equipmentCsv} from './equipment-utils.js';
 import {PACK_CLOUD_CONFIG} from './cloud-config.js';
+import {hasCloudConfig,resolveCloudConfig} from './cloud-config-utils.js';
 import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,watchCloudChanges,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest,fetchPackSettings,savePackSetting} from './cloud.js';
 import {cloudSettingsPanel} from './cloud-panel.js';
 import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
@@ -33,8 +34,8 @@ async function writeSetting(key,value){
  if(cloudActive()&&isShared&&['admin','cubmaster','treasurer'].includes(cloudState().member.role))await savePackSetting(key,value);
  return localWriteSetting(key,value);
 }
-const cloudSettings=()=>({projectUrl:settings('supabaseUrl')||PACK_CLOUD_CONFIG.projectUrl,publishableKey:settings('supabasePublishableKey')||PACK_CLOUD_CONFIG.publishableKey,packId:settings('supabasePackId')||PACK_CLOUD_CONFIG.packId});
-const cloudConfigured=()=>Boolean(cloudSettings().projectUrl);
+const cloudSettings=()=>resolveCloudConfig(PACK_CLOUD_CONFIG,{projectUrl:settings('supabaseUrl'),publishableKey:settings('supabasePublishableKey'),packId:settings('supabasePackId')});
+const cloudConfigured=()=>hasCloudConfig(cloudSettings());
 async function put(table,row){
  if(cloudActive()&&table==='tasks'&&cloudState().member?.role==='den_leader'&&!row.den){
   row={...row,den:ui.denChoice||cloudState().member.den_scopes?.[0]||''};
@@ -74,7 +75,7 @@ async function replaceAnnualLedger({previous=[],next=[],year,importedAt}){
  await writeSetting('financeLedgerImportedAt:'+year,importedAt);
 }
 async function setupCloud(){
- const cfg=cloudSettings();if(!cfg.projectUrl)return;
+ const cfg=cloudSettings();if(!hasCloudConfig(cfg))return;
  try{await configureCloud({projectUrl:cfg.projectUrl,publishableKey:cfg.publishableKey,pack:cfg.packId});ui.cloudError='';ensureRealtime();}
  catch(e){ui.cloudError=e.message;console.error('PackOps Cloud setup',e)}
 }
@@ -270,6 +271,7 @@ function volunteers(){
 }
 function eventForm(){return `<section class="panel"><div class="row-between"><h2>Create a local event workspace</h2>${btn('✕ Close','cancel-form','btn btn-ghost btn-small')}</div><p>This does not create an official Scoutbook Plus calendar event.</p><form data-form="event" class="stack"><div class="form-grid">${field('Event title','title','text','','required maxlength="120"')}${field('Date','date','date')}${field('Location','location')}${field('Event lead','owner')}${textarea('Preparation notes','notes','','rows="3"')}${textarea('Related links (one URL per line)','links','','rows="3"')}</div><div class="form-actions"><button class="btn" type="submit">Create event workspace</button></div></form></section>`}
 function eventDetail(e){
+ const canEditLead=!cloudConfigured()||['admin','cubmaster'].includes(cloudState().member?.role);
  const tasks=dbState.tasks.filter(t=>t.eventId===e.id);const rate=completion(tasks);
  const att=dbState.attachments.filter(a=>a.eventId===e.id);
  const allocations=dbState.budget.filter(x=>x.eventId===e.id&&(x.year||'2026-27')===activeYear());
@@ -281,6 +283,9 @@ function eventDetail(e){
  const equipmentNeeded=(e.equipmentIds||[]).map(id=>dbState.equipment.find(x=>x.id===id)).filter(Boolean);
  return `<div class="row-between no-print" style="margin-bottom:20px">${btn('← All events','back-events','btn btn-ghost')}${btn('Delete event','delete-event','btn btn-danger btn-small',`data-id="${e.id}"`)}</div>
  ${intro('Event workspace',e.title,`${niceDate(e.date)} · ${e.location||'Location not recorded'} · Lead: ${e.owner||'Unassigned'}`)}
+ <section class="panel stack" style="margin-bottom:18px"><div><span class="kicker">Who's leading?</span><h2>Event lead & contact</h2><p>Set the main point of contact here. Checklist jobs and volunteer assignments are managed below.</p></div>
+ ${canEditLead?`<form data-form="event-lead" data-id="${esc(e.id)}" class="stack"><div class="form-grid">${field('Event lead','owner','text',e.owner||'','maxlength="120" placeholder="Name of event lead"')}${field('Contact email (optional)','ownerEmail','email',e.ownerEmail||'','maxlength="254"')}</div><div class="form-actions"><button class="btn" type="submit">Save event lead</button></div></form>`:`<div><strong>${esc(e.owner||'No event lead assigned')}</strong>${e.ownerEmail?'<p>'+esc(e.ownerEmail)+'</p>':''}<p class="meta">A Pack administrator can update the event lead.</p></div>`}
+ </section>
  ${e.googleEventId?'<section class="panel stack" style="margin-bottom:18px"><div class="row-between"><strong>↻ Linked to Google Calendar</strong>'+(e.calendarUrl?link(e.calendarUrl,'View original event','btn btn-outline btn-small'):'')+'</div><p class="meta">The title, date and location follow Google Calendar on refresh. Notes, tasks, receipts and budgets stay in PackOps.</p>'+(e.description?'<p>'+esc(e.description)+'</p>':'')+'</section>':''}
  <div class="split"><div class="stack"><section class="panel"><div class="row-between"><h2>Preparation checklist</h2>${btn('+ Add checklist task','show-event-task','btn btn-small')}</div>${rate!==null?`<div class="preview-strip" style="margin:12px 0"><strong>${rate}% of recorded tasks complete</strong><span class="pill">${tasks.length} checklist items</span></div><div class="progress" style="margin-bottom:12px"><span style="width:${rate}%"></span></div>`:note('No tasks yet. Readiness is unknown until checklist tasks are entered.',true)}${tasks.length?tasks.map(taskRow).join(''):''}</section>${ui.form==='task'||ui.form==='edit-task'?taskForm(ui.editTask?dbState.tasks.find(t=>t.id===ui.editTask):null,e.id):''}
  <section class="panel"><h2>Event notes & links</h2><form data-form="event-notes" data-id="${e.id}" class="stack">${textarea('Planning notes','notes',e.notes,'rows="8"')}${textarea('Document or Scoutbook URLs, one per line','links',e.links||'','rows="4"')}<div class="form-actions"><button class="btn" type="submit">Save notes</button></div></form>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).length?`<div class="divider"></div><h3>Linked resources</h3>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).map(x=>`<p style="overflow-wrap:anywhere">${link(x,short(x,60),'btn btn-outline btn-small')}</p>`).join('')}`:''}</section></div>
@@ -389,7 +394,7 @@ function library(){
  <div class="library-grid">${all.map(item=>`<div class="link-tile"><span class="link-icon">${item.emoji}</span><div style="flex:1;min-width:0"><strong>${esc(item.label)}</strong><small>${esc(item.description||'')}</small><div class="task-options">${link(item.url,'Open','btn btn-small')}${item.fixed?'':btn('Remove','delete-bookmark','btn btn-ghost btn-small',`data-id="${item.id}"`)}</div></div></div>`).join('')}</div>`;
 }
 function settingsPage(){
- const panel=cloudSettingsPanel({state:cloudState(),configured:cloudSettings(),setupError:ui.cloudError,members:ui.cloudMembers,invites:ui.cloudInvites,esc,btn,field,select,note});
+ const panel=cloudSettingsPanel({state:cloudState(),configured:cloudSettings(),setupError:ui.cloudError,invitationNotice:ui.leaderInviteNotice||'',members:ui.cloudMembers,invites:ui.cloudInvites,esc,btn,field,select,note});
  if(cloudConfigured()&&!cloudActive())return `${intro('Private Pack data','Security & Google login','Sign in with an approved Pack Google account to access PackOps.')}${panel}`;
  return `${panel}${intro('Your device and Drive','Settings','Local privacy controls and optional, user-authorized Google Drive receipt uploads.')}
  <div class="split"><section class="panel stack"><h2>Connect Google services</h2><p>For receipt uploads, enable Drive API and Picker API. For upcoming events, enable Google Calendar API and grant calendar.readonly access. Use a Google OAuth Web Client ID authorized for your PackOps website. Tokens stay in memory; never enter client secrets.</p><p>Calendar connection status: <strong>${calendarConnected()?'Authorized for this session':'Not connected'}</strong>. Open Pack Calendar to select a calendar.</p>
@@ -719,6 +724,7 @@ async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
   case 'cloud-config':{
+   if(cloudSettings().managed)throw Error('This website is already configured by the Pack administrator.');
    const projectUrl=f('projectUrl'),publishableKey=f('publishableKey'),packId=f('packId');
    if(/service_role|sb_secret_/i.test(publishableKey))throw Error('Never enter a Supabase secret key in a browser');
    await configureCloud({projectUrl,publishableKey,pack:packId});
@@ -728,8 +734,9 @@ async function handleForm(form){
   }
   case 'cloud-invite-leader':{
    const denScopes=f('dens').split(',').map(x=>x.trim()).filter(Boolean);
-   await addLeaderInvite({email:f('email'),role:f('role'),denScopes});
-   await loadCloudAdmin();render();notify('Leader invitation approved. Ask that leader to sign into PackOps with this email.');return;
+   const result=await addLeaderInvite({email:f('email'),role:f('role'),denScopes,sendEmail:form.elements.sendEmail?.checked||false});
+   ui.leaderInviteNotice=result.emailStatus==='accepted'?'Approval saved. Email accepted by the sending provider; inbox delivery is not yet confirmed.':result.emailStatus==='failed'?'Approval saved, but email delivery was not confirmed: '+result.emailError:'Approval saved. No email was requested. Share the PackOps website link and ask the leader to Continue with Google using this email.';
+   await loadCloudAdmin();render();notify(ui.leaderInviteNotice);return;
   }
   case 'family-form-create':{
    if(!cloudActive())throw Error('Sign in and activate the Pack shared database first');
@@ -747,7 +754,7 @@ async function handleForm(form){
    ui.familyLink=result.url;
    ui.familyResults=await getFamilyResponses(f('formId'));
    render();
-   notify(result.emailed?'Invitation email sent':'Private link generated. Copy it and share with the intended household.');return;
+   notify(result.emailed?'Email accepted by the sending provider; inbox delivery is not yet confirmed.':result.emailError||'Private link generated. Copy it and share with the intended household.',Boolean(result.emailError));return;
   }
   case 'family-public-response':{
    if(!ui.familyToken)throw Error('Open a private invitation link first');
@@ -901,6 +908,12 @@ async function handleForm(form){
    if(!ev||!dbState.equipment.some(r=>r.id===id))throw Error('Choose equipment already in Pack inventory');
    await put('events',{...ev,equipmentIds:[...new Set([...(ev.equipmentIds||[]),id])],updatedAt:now()});
    await refresh();notify('Equipment linked to event');return;
+  }
+  case 'event-lead':{
+   if(cloudConfigured()&&!['admin','cubmaster'].includes(cloudState().member?.role))throw Error('A Pack administrator must update the event lead.');
+   const ev=findEvent(form.dataset.id);if(!ev)throw Error('Event workspace not found.');
+   await put('events',{...ev,owner:f('owner').trim(),ownerEmail:f('ownerEmail').trim(),updatedAt:now()});
+   await refresh();notify('Event lead saved');return;
   }
   case 'event-notes':{const old=findEvent(form.dataset.id);if(old)await put('events',{...old,notes:f('notes'),links:f('links'),updatedAt:now()});break;}
   case 'attachment':{

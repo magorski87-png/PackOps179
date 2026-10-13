@@ -29,3 +29,10 @@ jobs:
           test -f dist/calendar-api.js
           test -f dist/backup.js
           test -f dist/settings-actions.js
+          test -f dist/cloud-config-utils.js
+          test ! -d dist/supabase
+      - name: Upload review build (does not deploy)
+        uses: actions/upload-artifact@v4
+        with:
+          name: packops-review-build
+          path: dist

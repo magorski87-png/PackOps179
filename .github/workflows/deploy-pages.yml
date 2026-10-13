@@ -1,0 +1,43 @@
+name: Deploy PackOps (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: packops-production
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build with public connection identifiers
+        run: npm run build
+        env:
+          PACKOPS_REQUIRE_CLOUD_CONFIG: 'true'
+          PACKOPS_SUPABASE_URL: ${{ vars.PACKOPS_SUPABASE_URL }}
+          PACKOPS_SUPABASE_PUBLISHABLE_KEY: ${{ vars.PACKOPS_SUPABASE_PUBLISHABLE_KEY }}
+          PACKOPS_PACK_ID: ${{ vars.PACKOPS_PACK_ID }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy reviewed build
+        id: deployment
+        uses: actions/deploy-pages@v4

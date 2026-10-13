@@ -2,6 +2,7 @@
 // Deploy with --no-verify-jwt: public visitors have no Supabase session.
 // Every privileged operation explicitly checks a verified Auth user and Pack membership.
 import {createClient} from 'npm:@supabase/supabase-js@2';
+import {sendEmail} from '../_shared/send-email.js';
 
 const cloudUrl=Deno.env.get('SUPABASE_URL')!;
 const serverKey=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -65,16 +66,13 @@ Deno.serve(async(req:Request)=>{
    const created=await db.from('family_invitations').insert(data).select('id').single();
    if(created.error)throw created.error;
    const url=publicSite+sitePath+'#family/'+token;
-   let emailed=false;
+   let delivery:{emailStatus:string,emailError?:string,emailId?:string}={emailStatus:'not-requested'};
    if(body.sendEmail){
-    const sent=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:'Bearer '+resendKey,'Content-Type':'application/json'},body:JSON.stringify({
-     from,to:[email],subject:'Pack 179: '+form.title,
-     text:'Pack 179 invites your family to respond to '+form.title+'.\n\nOpen your private response link:\n'+url+'\n\nThis link is intended for your household only.\n'
-    })});
-    emailed=sent.ok;
-    if(emailed)await db.from('family_invitations').update({delivery_status:'emailed'}).eq('id',created.data.id);
+    delivery=await sendEmail({apiKey:resendKey,from,to:email,subject:'Pack 179: '+form.title,
+     text:'Pack 179 invites your family to respond to '+form.title+'.\n\nOpen your private response link:\n'+url+'\n\nThis link is intended for your household only.\n',idempotencyKey:'family-'+created.data.id});
+    if(delivery.emailStatus==='accepted')await db.from('family_invitations').update({delivery_status:'emailed'}).eq('id',created.data.id);
    }
-   return respond({url,emailed,deliveryStatus:emailed?'emailed':'link-created'});
+   return respond({url,emailed:delivery.emailStatus==='accepted',deliveryStatus:delivery.emailStatus==='accepted'?'emailed':'link-created',...delivery});
   }
   const token=String(body.token||'');
   if(!HEX.test(token))return invalid('Invalid invitation link',401);

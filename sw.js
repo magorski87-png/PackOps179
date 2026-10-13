@@ -1,7 +1,8 @@
-const CACHE='packops-shell-v15';
+const CACHE='packops-shell-v16';
 const ROOT=self.registration.scope;
 const FILES=['','index.html','styles.css','app.js','db.js','data.js','drive.js','roster-import.js','calendar-api.js','calendar-import.js','finance.js','finance-ui.js','finance-google.js','finance-template.js','pack-config.js','backup.js','settings-actions.js','event-sync.js','budget-wizard.js','budget-wizard-ui.js','finance-insights.js','google-config.js','equipment-utils.js','roster-sync.js','cloud-config.js','cloud.js','cloud-panel.js','family-ui.js','workspace-v06-ui.js','manifest.webmanifest','icon.svg','icon-192.png','icon-512.png'];
 self.addEventListener('install',event=>{
+  FILES.push('cloud-config-utils.js');
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES.map(x=>new URL(x,ROOT).href))).then(()=>self.skipWaiting()));
 });
 self.addEventListener('activate',event=>{

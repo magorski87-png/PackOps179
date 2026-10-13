@@ -26,7 +26,8 @@ export async function calendarAuthorize(clientId){
    },
    error_callback:err=>reject(Error(err.message||err.type||'Google authorization failed'))
   });
-  client.requestAccessToken({prompt:'consent'});
+  // New permissions still require consent; existing grants need not be repeated.
+  client.requestAccessToken({prompt:'select_account'});
  });
 }
 async function request(endpoint,clientId){

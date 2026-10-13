@@ -9,11 +9,12 @@ test('Calendar workspace ID is stable when event title/date change',()=>{
  const w=workspaceForCalendarEvent(g);
  assert.equal(w.id,linkedWorkspaceId(g));
  const newGoogle={...g,title:'Scouting for Food - Bag Drop',date:'2026-11-04',location:'Commons'};
- const modified=workspaceForSync(newGoogle,[{...w,owner:'Volunteer',notes:'Bring bags',links:'https://example.com'}]);
+ const modified=workspaceForSync(newGoogle,[{...w,owner:'Volunteer',ownerEmail:'lead@example.com',notes:'Bring bags',links:'https://example.com'}]);
  assert.equal(modified.id,w.id);
  assert.equal(modified.date,'2026-11-04');
  assert.equal(modified.title,newGoogle.title);
  assert.equal(modified.owner,'Volunteer');
+ assert.equal(modified.ownerEmail,'lead@example.com');
  assert.equal(modified.notes,'Bring bags');
  assert.equal(modified.links,'https://example.com');
  assert.equal(calendarWorkspaceSummary([g], [w]).planned,1);
