@@ -124,6 +124,12 @@ off those alerts or prove what caused them.
 
 ## Verify a new Den Leader
 
+The event workspace also restores a prominent **Event lead & contact** section
+above the checklist. Admins can enter the lead directly and save; no task or
+volunteer position is required. It uses the existing event owner field, keeps
+other event data intact, and survives Google Calendar refresh. Other roles see
+the lead read-only, consistent with the existing event-write RLS policy.
+
 1. As an existing admin, approve a test leader's exact Google email as
    **Den Leader**, with their den (for example, Webelos). Optionally send email.
 2. On a fresh browser profile/device with no PackOps settings, open the published

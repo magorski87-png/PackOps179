@@ -271,6 +271,7 @@ function volunteers(){
 }
 function eventForm(){return `<section class="panel"><div class="row-between"><h2>Create a local event workspace</h2>${btn('✕ Close','cancel-form','btn btn-ghost btn-small')}</div><p>This does not create an official Scoutbook Plus calendar event.</p><form data-form="event" class="stack"><div class="form-grid">${field('Event title','title','text','','required maxlength="120"')}${field('Date','date','date')}${field('Location','location')}${field('Event lead','owner')}${textarea('Preparation notes','notes','','rows="3"')}${textarea('Related links (one URL per line)','links','','rows="3"')}</div><div class="form-actions"><button class="btn" type="submit">Create event workspace</button></div></form></section>`}
 function eventDetail(e){
+ const canEditLead=!cloudConfigured()||['admin','cubmaster'].includes(cloudState().member?.role);
  const tasks=dbState.tasks.filter(t=>t.eventId===e.id);const rate=completion(tasks);
  const att=dbState.attachments.filter(a=>a.eventId===e.id);
  const allocations=dbState.budget.filter(x=>x.eventId===e.id&&(x.year||'2026-27')===activeYear());
@@ -282,6 +283,9 @@ function eventDetail(e){
  const equipmentNeeded=(e.equipmentIds||[]).map(id=>dbState.equipment.find(x=>x.id===id)).filter(Boolean);
  return `<div class="row-between no-print" style="margin-bottom:20px">${btn('← All events','back-events','btn btn-ghost')}${btn('Delete event','delete-event','btn btn-danger btn-small',`data-id="${e.id}"`)}</div>
  ${intro('Event workspace',e.title,`${niceDate(e.date)} · ${e.location||'Location not recorded'} · Lead: ${e.owner||'Unassigned'}`)}
+ <section class="panel stack" style="margin-bottom:18px"><div><span class="kicker">Who's leading?</span><h2>Event lead & contact</h2><p>Set the main point of contact here. Checklist jobs and volunteer assignments are managed below.</p></div>
+ ${canEditLead?`<form data-form="event-lead" data-id="${esc(e.id)}" class="stack"><div class="form-grid">${field('Event lead','owner','text',e.owner||'','maxlength="120" placeholder="Name of event lead"')}${field('Contact email (optional)','ownerEmail','email',e.ownerEmail||'','maxlength="254"')}</div><div class="form-actions"><button class="btn" type="submit">Save event lead</button></div></form>`:`<div><strong>${esc(e.owner||'No event lead assigned')}</strong>${e.ownerEmail?'<p>'+esc(e.ownerEmail)+'</p>':''}<p class="meta">A Pack administrator can update the event lead.</p></div>`}
+ </section>
  ${e.googleEventId?'<section class="panel stack" style="margin-bottom:18px"><div class="row-between"><strong>↻ Linked to Google Calendar</strong>'+(e.calendarUrl?link(e.calendarUrl,'View original event','btn btn-outline btn-small'):'')+'</div><p class="meta">The title, date and location follow Google Calendar on refresh. Notes, tasks, receipts and budgets stay in PackOps.</p>'+(e.description?'<p>'+esc(e.description)+'</p>':'')+'</section>':''}
  <div class="split"><div class="stack"><section class="panel"><div class="row-between"><h2>Preparation checklist</h2>${btn('+ Add checklist task','show-event-task','btn btn-small')}</div>${rate!==null?`<div class="preview-strip" style="margin:12px 0"><strong>${rate}% of recorded tasks complete</strong><span class="pill">${tasks.length} checklist items</span></div><div class="progress" style="margin-bottom:12px"><span style="width:${rate}%"></span></div>`:note('No tasks yet. Readiness is unknown until checklist tasks are entered.',true)}${tasks.length?tasks.map(taskRow).join(''):''}</section>${ui.form==='task'||ui.form==='edit-task'?taskForm(ui.editTask?dbState.tasks.find(t=>t.id===ui.editTask):null,e.id):''}
  <section class="panel"><h2>Event notes & links</h2><form data-form="event-notes" data-id="${e.id}" class="stack">${textarea('Planning notes','notes',e.notes,'rows="8"')}${textarea('Document or Scoutbook URLs, one per line','links',e.links||'','rows="4"')}<div class="form-actions"><button class="btn" type="submit">Save notes</button></div></form>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).length?`<div class="divider"></div><h3>Linked resources</h3>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).map(x=>`<p style="overflow-wrap:anywhere">${link(x,short(x,60),'btn btn-outline btn-small')}</p>`).join('')}`:''}</section></div>
@@ -904,6 +908,12 @@ async function handleForm(form){
    if(!ev||!dbState.equipment.some(r=>r.id===id))throw Error('Choose equipment already in Pack inventory');
    await put('events',{...ev,equipmentIds:[...new Set([...(ev.equipmentIds||[]),id])],updatedAt:now()});
    await refresh();notify('Equipment linked to event');return;
+  }
+  case 'event-lead':{
+   if(cloudConfigured()&&!['admin','cubmaster'].includes(cloudState().member?.role))throw Error('A Pack administrator must update the event lead.');
+   const ev=findEvent(form.dataset.id);if(!ev)throw Error('Event workspace not found.');
+   await put('events',{...ev,owner:f('owner').trim(),ownerEmail:f('ownerEmail').trim(),updatedAt:now()});
+   await refresh();notify('Event lead saved');return;
   }
   case 'event-notes':{const old=findEvent(form.dataset.id);if(old)await put('events',{...old,notes:f('notes'),links:f('links'),updatedAt:now()});break;}
   case 'attachment':{
