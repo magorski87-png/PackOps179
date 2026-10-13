@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,cp,readFile,readdir,rm} from 'node:fs/promises';
+import {mkdtemp,cp,readFile,readdir,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -9,6 +9,8 @@ test('release build requires complete public config, excludes server files, and 
  const cwd=path.join(temp,'app');
  try{
   await cp(root,cwd,{recursive:true,filter:source=>!['.git','dist','node_modules'].some(p=>path.relative(root,source).split(path.sep).includes(p))});
+  // Test missing-config behavior independently of the real published identifiers.
+  await writeFile(path.join(cwd,'cloud-config.js'),"export const PACK_CLOUD_CONFIG={projectUrl:'',publishableKey:'',packId:''};\n");
   const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('PACKOPS_')));
   const build=extra=>spawnSync(process.execPath,['tools/build.mjs'],{cwd,env:{...env,...extra},encoding:'utf8'});
   assert.equal(build({}).status,0);

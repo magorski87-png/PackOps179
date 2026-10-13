@@ -1,13 +1,17 @@
 # Automatic leader sign-in and invitation email
 
-This change is staged for review. Do not merge or deploy until the three public
-values below are confirmed. No SQL migrations, RLS policies, role definitions,
+This change is staged for review. The owner supplied the public URL/key and
+confirmed the Pack ID on October 12, 2026; these are now in `cloud-config.js`.
+Deployment still requires the owner's release go-ahead. No SQL migrations, RLS policies, role definitions,
 existing records, or browser data are changed by this update.
 
 ## One-time public configuration
 
-The repository's original `cloud-config.js` has three empty values. No actual
-Pack UUID was found in the source. An Auth user UUID is not a Pack UUID.
+The repository's original `cloud-config.js` had three empty values. The draft now
+uses the confirmed Pack UUID `bcf48631-8f33-4c66-b1ca-1573c769fd1b` and project
+`https://xzhxegqthmffxcehxhvz.supabase.co`. The supplied REST URL was normalized to
+the project origin. These values are owner-confirmed; live database access has
+not been verified. An Auth user UUID is not a Pack UUID.
 In the existing Supabase project, use Table Editor → `public.packs`, or run this
 read-only SQL and identify the existing Pack 179 row:
 
@@ -18,7 +22,8 @@ select id, name from public.packs order by name;
 Do not create another Pack or change existing IDs. Confirm the intended row
 before using its ID. No database password or privileged key is needed here.
 
-Set these GitHub repository **Actions variables**, under Settings → Secrets and
+The committed public configuration works without Actions variables. To override
+it for another deployment, set all three GitHub repository **Actions variables**, under Settings → Secrets and
 variables → Actions → Variables (not OAuth or database secrets):
 
 | Variable | Value |
@@ -45,8 +50,8 @@ Do not repeat the database/bootstrap setup if it has already been completed.
 ## Review and deliberate deployment
 
 PR validation runs tests and builds a downloadable `packops-review-build`
-artifact. It does not deploy. Without the public values, that artifact is for
-code review/local setup, not ready for leader onboarding.
+artifact. It does not deploy. It now includes the owner-supplied public values;
+live Google sign-in and email delivery still require the checks below.
 
 1. Review the PR and confirm the public values above.
 2. Before merging, check GitHub Settings → Pages. If it currently publishes from

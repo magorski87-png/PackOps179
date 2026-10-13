@@ -152,4 +152,5 @@ A Google Cloud consent screen may require configuration/verification for third-p
 
 See [AUTOMATIC_SETUP.md](AUTOMATIC_SETUP.md) for one-time public backend configuration,
 the manual deployment workflow, leader invitation email, and new-device verification.
-The deployed backend values must be confirmed before release.
+The draft includes owner-confirmed public backend values; production deployment
+and live sign-in verification are still pending.
