@@ -1,23 +1,23 @@
+import {validateCloudConfiguration} from './cloud-config-validation.js';
 // PackOps v0.6 shared backend. Browser gets ONLY Supabase publishable/anon key.
 // Never put service_role keys, Google OAuth secrets or email credentials here.
 export const SHARED_TABLES=['events','tasks','equipment','roster','budget','financeLedger','financeAccounts','financeAdjustments','financeReimbursements','financeTags','financeAudit','receipts','denPlans','adventureProgress','attendance'];
 export const CLOUD_ROLES=['admin','cubmaster','treasurer','den_leader','volunteer'];
-let client=null,packId='',user=null,member=null,url='';
+let client=null,packId='',user=null,member=null,url='',clientKey='';
 let remoteLoad=null;let changesChannel=null;
 export function cloudState(){return {configured:!!client,packId,authenticated:!!user,member,user:{email:user?.email||'',id:user?.id||''},url};}
 export function sharedTable(name){return SHARED_TABLES.includes(name)}
 const fail=({error},context)=>{if(error)throw Error(context+': '+error.message);};
 export async function configureCloud({projectUrl,publishableKey,pack}){
- const endpoint=new URL(String(projectUrl||'').trim());
- if(endpoint.protocol!=='https:'||(!endpoint.hostname.endsWith('.supabase.co')&&!endpoint.hostname.endsWith('.supabase.in')))throw Error('Use the HTTPS Supabase project URL from Project Settings.');
- if(!publishableKey?.trim())throw Error('Enter the Supabase publishable / anon key (never the secret or service_role key).');
- if(/service_role|sb_secret_/i.test(publishableKey))throw Error('Never enter a Supabase secret key in the website.');
- if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pack||''))throw Error('Enter the Pack UUID from the secure Supabase setup instructions.');
+ const validated=validateCloudConfiguration({projectUrl,publishableKey,packId:pack});
+ const endpoint=new URL(validated.projectUrl);
+ publishableKey=validated.publishableKey;pack=validated.packId;
  if(!remoteLoad)remoteLoad=import('https://esm.sh/@supabase/supabase-js@2.76.1').catch(e=>{remoteLoad=null;throw Error('Could not load Supabase library. '+e.message)});
  const {createClient}=await remoteLoad;
- if(client&&url===endpoint.origin&&packId===pack){return syncCloudIdentity()}
+ if(client&&url===endpoint.origin&&packId===pack&&clientKey===publishableKey){return syncCloudIdentity()}
+ await stopCloudChanges();user=null;member=null;
  client=createClient(endpoint.origin,publishableKey.trim(),{auth:{flowType:'pkce',autoRefreshToken:true,persistSession:true,detectSessionInUrl:true}});
- url=endpoint.origin;packId=pack;return syncCloudIdentity();
+ url=endpoint.origin;packId=pack;clientKey=publishableKey;return syncCloudIdentity();
 }
 export async function syncCloudIdentity(){
  if(!client)return cloudState();

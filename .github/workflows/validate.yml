@@ -29,3 +29,7 @@ jobs:
           test -f dist/calendar-api.js
           test -f dist/backup.js
           test -f dist/settings-actions.js
+          test -f dist/cloud-config-validation.js
+      - name: Verify configured production build
+        run: |
+          node --input-type=module -e "import {PACK_CLOUD_CONFIG as c} from './cloud-config.js'; import {hasCloudConfiguration as has} from './cloud-config-validation.js'; import {execFileSync} from 'node:child_process'; if(has(c)) execFileSync(process.execPath,['tools/build.mjs','--require-cloud'],{stdio:'inherit'}); else console.log('::warning::Public Pack configuration is blank. Do not release automatic sign-in until supplied and build:production passes.');"

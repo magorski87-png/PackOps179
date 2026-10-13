@@ -5,12 +5,14 @@ export function cloudSettingsPanel({state,configured,setupError='',members=[],in
  const text=state.authenticated?state.member?'Approved · '+role:'Google sign-in successful; your Pack membership is awaiting approval':'Not signed in';
  return `<section class="panel stack"><div class="row-between"><div><h2>Secure shared PackOps · Supabase + Google</h2><p>Approved leaders share one database, rather than maintaining separate phone and PC records. Parents can respond to private RSVP links without opening the leadership app.</p></div><span class="pill ${state.member?'success':'warning'}">${esc(text)}</span></div>
  ${setupError?note('Connection issue: '+esc(setupError),true):''}
+ ${configured.managed?'<p>The Pack connection is configured automatically. Sign in with your approved Google account.</p>':`<details><summary>Administrator setup / existing device connection</summary><p>Leaders: ask your Pack administrator to finish website setup. You do not need backend credentials.</p>
  <form data-form="cloud-config" class="stack"><div class="form-grid">
  ${field('Supabase Project URL (public)','projectUrl','url',configured.projectUrl||'','required placeholder="https://PROJECT.supabase.co"')}
  ${field('Supabase publishable or anon key (public)','publishableKey','text',configured.publishableKey||'','required autocomplete="off"')}
  ${field('Pack UUID','packId','text',configured.packId||'','required')}
  </div><div class="form-actions"><button class="btn" type="submit">Connect to Pack backend</button></div></form>
- <p class="meta">These are public browser connection identifiers, never service_role credentials. Google login is configured separately in Supabase Auth and does not replace your existing read-only Google Calendar OAuth.</p>
+ <p class="meta">These are public browser connection identifiers, never service_role credentials. Google login is configured separately in Supabase Auth and does not replace your existing read-only Google Calendar OAuth.</p></details>`}
+ ${setupError?btn('Retry connection','cloud-retry','btn btn-outline'):''}
  ${state.configured?`<div class="row wrap">${!state.authenticated?btn('Continue with Google','cloud-sign-in','btn'):btn('Sign out of PackOps','cloud-sign-out','btn btn-outline')}${state.member?btn('Refresh shared records','cloud-refresh','btn btn-outline'):''}</div>`:''}
  ${state.member?`<div class="privacy-strip">Shared Pack: ${esc(state.packId)} · Signed in as ${esc(state.user?.email||'approved leader')}. Your approved role and den permissions are enforced in PostgreSQL.</div>`:''}
  ${admin?`<section class="stack"><h3>Users & permissions</h3><p>Invite a leader by the email they use with Google. Only an administrator can grant access. After that person signs in, their invitation is activated for the assigned role and den.</p>
