@@ -58,6 +58,18 @@ test('ledger import review flags inconsistent running balances',()=>{
  assert.ok(ledgerImportReview(rows).balanceWarnings.length>0);
 });
 
+test('ledger review carries movements across blank historical balance cells',()=>{
+ const rows=[
+  {sourceRow:2,description:'Opening balance',isOpening:true,balance:100,debit:0,credit:0},
+  {sourceRow:3,description:'Manual expense',balance:null,debit:25,credit:0},
+  {sourceRow:4,description:'Manual deposit',balance:null,debit:0,credit:10},
+  {sourceRow:5,description:'Posted expense',balance:77,debit:8,credit:0}
+ ];
+ assert.deepEqual(ledgerImportReview(rows).balanceWarnings,[]);
+ rows[3].balance=92;
+ assert.deepEqual(ledgerImportReview(rows).balanceWarnings,[5]);
+});
+
 test('old popcorn tags require review and are not treated as Pack revenue',()=>{
  const rows=parseLedgerCsv(sample);
  const tags=[{id:rows[1].id,kind:'income',category:'Popcorn Fundraising'}];

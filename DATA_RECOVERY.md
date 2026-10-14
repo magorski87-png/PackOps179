@@ -2,7 +2,7 @@
 
 ## Principles
 
-1. **Official Google Drive files remain the source of truth.** PackOps never rewrites the treasurer's financial ledger or individual Scout credit Google Sheet without an explicitly authorized future sync/write feature.
+1. **Official Google Drive files remain the source of truth.** PackOps appends a reviewed transaction to the official ledger only after the native Google Sheet bridge has been deliberately configured and a finance reviewer confirms Post. Scout credits are never written by PackOps.
 2. **Every mutable local record can be preserved in an encrypted restore point.** In Settings → Encrypted Backup & Rebuild, choose Download or an explicitly selected Drive backup folder. No background sync exists yet.
 3. **Store encrypted backups in a restricted Pack Drive folder.** The application cannot verify folder sharing restrictions and cannot recover a lost passphrase. Never commit Scout data, ledger exports, backups, or private receipts to GitHub.
 4. **Different devices are not live-synchronized.** Restore is a point-in-time replacement, not a merge. Back up before clearing storage, installing on another device, or changing browsers. Don't make simultaneous edits to two unsynchronized copies.
@@ -13,7 +13,7 @@
 |---|---|---|---|
 | Upcoming events | Pack 179 Google Calendar | Read-only authorized Google Calendar session or an imported ICS snapshot | Reconnect Calendar, or restore imported ICS events |
 | Membership and guardian contacts | Scoutbook Plus / exported roster | Local CSV import, filter, export; no Scoutbook write access | Reimport authorized roster CSV or encrypted PackOps backup |
-| Treasurer transactions / cash | 2026–27 treasurer ledger XLSX in Pack Drive | Read-only CSV import; classification tags stored locally | Reimport current ledger CSV and restore local category/event tags from encrypted backup |
+| Treasurer transactions / cash | 2026–27 native Google Sheet in Pack Drive; archived Excel original and separate Excel backup | Read-only CSV import and reviewed transaction posting once the bridge is installed; classification tags stored locally | Reimport current Sheet CSV and restore local category/event tags from encrypted backup |
 | Scout credits and dues owed | 2026–27 Individual Scout Credits Google Sheet | Read-only authorized refresh or CSV import; calculations compare to PackOps dues | Refresh authorized Google Sheet or import its current CSV, then restore any separate local proposals from encrypted backup |
 | Individual dues amount | Per-year PackOps setting (from reviewed Pack decision) | Stored separately as `financeDues:YYYY-YY`, included in encrypted backup | Restore encrypted backup or re-enter dues for the selected year |
 | Draft budgets, targets, categories, projections | PackOps working records based on approved source documents | Stored locally, distinguish plans from actual ledger transactions | Restore encrypted backup |
@@ -46,7 +46,7 @@ Alternatively choose **Download encrypted backup** and manually place it in your
 5. Reconnect Google Calendar and Google Drive. These authorizations and API configuration are intentionally not backed up.
 6. Refresh authoritative source data if the treasurer, Scout-credit Sheet, or calendar changed after the backup.
 
-**Recovery limitations:** There is no automatic background backup, no multi-person authentication, no real-time cross-device editing, no Google Sheet two-way synchronization, and no automatic conflict resolution in this version. Full, secure multi-leader sync requires a protected backend with role-based authorization and an auditable sync protocol.
+**Recovery limitations:** There is no automatic background backup or automatic conflict resolution. A local restore does not overwrite Supabase transaction requests, audit history, or the Google ledger. Use independent Supabase backups for server recovery; the encrypted export preserves a readable archive for review, not a direct server restore.
 
 ## Restore integrity and privacy
 

@@ -24,12 +24,11 @@ export function budgetWizardPanel({ui,year,dues,settings,budget,esc,money,field,
   result+='</div><div class="row">'+btn('← Back','finance-wizard-back','btn btn-outline')+'<button class="btn" type="submit">Generate expense draft →</button></div></form>';
  }else if(step===2){
   result+='<p>Adjust every annual expense below. Amounts are draft estimates based on the selected source. Zero-dollar lines are allowed.</p><form data-form="wizard-expenses" class="stack">';
-  let previous='';
   for(let i=0;i<expenses.length;i++){
    const e=expenses[i];
-   if(e.category!==previous){result+='<h3>'+esc(e.category)+'</h3>';previous=e.category;}
-   result+='<div class="row-between mobile-stack"><label for="expense_'+i+'">'+esc(e.detail)+'</label><div style="min-width:135px"><input class="input" type="number" id="expense_'+i+'" name="expense_'+i+'" min="0" max="1000000000" step="0.01" value="'+esc(String(e.planned))+'" required></div></div>';
+   result+='<div class="wizard-expense-row">'+field('Category','category_'+i,'text',e.category,'required maxlength="100"')+field('Item / purpose','detail_'+i,'text',e.detail,'required maxlength="120"')+field('Planned amount ($)','expense_'+i,'number',e.planned,'min="0" max="1000000000" step="0.01" required')+btn('Remove','wizard-remove-expense','btn btn-danger btn-small','data-id="'+i+'"')+'</div>';
   }
+  result+=btn('+ Add expense','wizard-add-expense','btn btn-outline');
   result+='<div class="row">'+btn('← Back','finance-wizard-back','btn btn-outline')+'<button class="btn" type="submit">Review full-year budget →</button></div></form>';
  }else{
   const p=wizardPreview(config,expenses);

@@ -26,7 +26,7 @@ export async function calendarAuthorize(clientId){
    },
    error_callback:err=>reject(Error(err.message||err.type||'Google authorization failed'))
   });
-  client.requestAccessToken({prompt:'consent'});
+  client.requestAccessToken({prompt:''});
  });
 }
 async function request(endpoint,clientId){

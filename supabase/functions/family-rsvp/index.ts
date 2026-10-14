@@ -49,7 +49,7 @@ Deno.serve(async(req:Request)=>{
    const {data:member}=await db.from('pack_members').select('role,den_scopes').eq('pack_id',packId).eq('user_id',account.user.id).eq('status','active').maybeSingle();
    if(!member||!['admin','cubmaster','den_leader'].includes(member.role))return invalid('Leader permission required',403);
    const {data:form}=await db.from('family_forms').select('id,title,description,kind,status,den_scope,closes_at').eq('pack_id',packId).eq('id',formId).maybeSingle();
-   if(!form||form.status!=='open')return invalid('This form is not open');
+   if(!form||form.status!=='open'||(form.closes_at&&Date.parse(form.closes_at)<=Date.now()))return invalid('This form is not open');
    if(member.role==='den_leader'&&(!form.den_scope||!member.den_scopes.includes(form.den_scope)))return invalid('Not assigned to this den',403);
    const label=String(body.recipientLabel||'').trim().slice(0,120);
    const email=String(body.recipientEmail||'').trim().toLowerCase();
@@ -65,16 +65,18 @@ Deno.serve(async(req:Request)=>{
    const created=await db.from('family_invitations').insert(data).select('id').single();
    if(created.error)throw created.error;
    const url=publicSite+sitePath+'#family/'+token;
-   let emailed=false;
+   let emailed=false;let emailError='';
    if(body.sendEmail){
-    const sent=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:'Bearer '+resendKey,'Content-Type':'application/json'},body:JSON.stringify({
+    try{const sent=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:'Bearer '+resendKey,'Content-Type':'application/json','Idempotency-Key':'family-'+created.data.id},body:JSON.stringify({
      from,to:[email],subject:'Pack 179: '+form.title,
      text:'Pack 179 invites your family to respond to '+form.title+'.\n\nOpen your private response link:\n'+url+'\n\nThis link is intended for your household only.\n'
     })});
     emailed=sent.ok;
-    if(emailed)await db.from('family_invitations').update({delivery_status:'emailed'}).eq('id',created.data.id);
+    if(!emailed)emailError='The email provider rejected delivery. Check sender verification and delivery logs; the private link is available below.';
+    }catch{emailError='Email delivery is unconfirmed. Check delivery logs before resending; the private link is available below.'}
+    await db.from('family_invitations').update({delivery_status:emailed?'emailed':'email-failed'}).eq('id',created.data.id);
    }
-   return respond({url,emailed,deliveryStatus:emailed?'emailed':'link-created'});
+   return respond({url,emailed,errorMessage:emailError,deliveryStatus:emailed?'emailed':body.sendEmail?'email-failed':'link-created'});
   }
   const token=String(body.token||'');
   if(!HEX.test(token))return invalid('Invalid invitation link',401);

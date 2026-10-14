@@ -32,7 +32,10 @@ export function parseLedgerCsv(content){
   if(!finiteMoney(Math.abs(out))||!finiteMoney(Math.abs(input)))throw Error('Transaction amount out of allowed range on row '+(i+1));
   const key=[date,normal(description),out,input,rawBalance].join('|');
   const duplicateIndex=(taken.get(key)||0)+1;taken.set(key,duplicateIndex);
-  const id=`ledger:${key}:${duplicateIndex}`;
+  const postingId=rowValue(r,headers,'packops id');
+  if(postingId&&!/^[0-9a-f-]{36}$/i.test(postingId))throw Error('Invalid PackOps ID on ledger row '+(i+1));
+  const id=postingId?'packops:'+postingId:`ledger:${key}:${duplicateIndex}`;
+  if(parsed.some(row=>row.id===id))throw Error('Duplicate PackOps ID in ledger. Resolve it in the official ledger before importing.');
   const shortDate=/^\d{4}-\d{2}-\d{2}/.exec(date)?.[0]||'';
   const starting=/starting balance|opening balance/i.test(description);
   parsed.push({id,description,date:shortDate,debit:round(out),credit:round(input),balance:rawBalance!==''?amount(rawBalance):null,isOpening:starting,sourceRow:i+1,source:'Treasurer ledger CSV'});
@@ -129,14 +132,17 @@ export function ledgerImportReview(rows){
  const withBalances=rows.filter(r=>r.balance!==null);
  const last=withBalances.at(-1);
  const balanceWarnings=[];
- let prior=null;
+ let prior=null,pendingMovement=0;
  for(const row of rows){
-  if(row.balance===null)continue;
+  if(row.balance===null){
+   if(prior!==null)pendingMovement=round(pendingMovement+(Number(row.credit)||0)-(Number(row.debit)||0));
+   continue;
+  }
   if(prior!==null&&!row.isOpening){
-   const implied=round(prior+(Number(row.credit)||0)-(Number(row.debit)||0));
+   const implied=round(prior+pendingMovement+(Number(row.credit)||0)-(Number(row.debit)||0));
    if(Math.abs(implied-row.balance)>0.02)balanceWarnings.push(row.sourceRow);
   }
-  prior=row.balance;
+  prior=row.balance;pendingMovement=0;
  }
  return {rows:rows.length,opening:withBalances.find(x=>x.isOpening)?.balance??null,
   lastBalance:last?.balance??null,lastBalanceDate:last?.date||'',lastBalanceItem:last?.description||'',

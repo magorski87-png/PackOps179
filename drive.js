@@ -23,7 +23,7 @@ export async function authorize(clientId){
    },
    error_callback(error){reject(Error(error.message||error.type||'Could not sign into Google'));}
   });
-  client.requestAccessToken({prompt:'consent'});
+  client.requestAccessToken({prompt:''});
  });
 }
 export function disconnect(){token='';expiresAt=0}

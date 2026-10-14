@@ -16,7 +16,7 @@ export async function financeAuthorize(clientId){
    if(!r.access_token){reject(Error(r.error_description||r.error||'Google authorization cancelled'));return}
    sheetsToken=r.access_token;expiry=Date.now()+1000*(r.expires_in||3600);resolve(sheetsToken);
   },error_callback:e=>reject(Error(e.message||e.type||'Could not authorize Google Sheets'))});
-  auth.requestAccessToken({prompt:'consent'});
+  auth.requestAccessToken({prompt:''});
  });
 }
 export function financeDisconnect(){sheetsToken='';expiry=0}

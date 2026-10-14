@@ -1,3 +1,8 @@
+import {transactionDraft,combinedLedger,isFinanceReviewer} from './transaction-workflow.js';
+import {loadTransactionWorkflow,submitTransaction,reviewTransaction,notifyTransaction,postTransaction,fetchOfficialLedger,sendLeaderInvite,markTransactionNotificationsRead} from './cloud.js';
+import {budgetDraft,readWizardExpenses} from './finance-editing.js';
+import {familyRecipients,invitationPreview} from './family-invitations.js';
+import {prepareAttachment,hasPendingForm} from './attachments.js';
 import {TABLES,list as localList,get,put as localPut,remove as localRemove,readSetting,writeSetting as localWriteSetting,clearEverything,replaceAnnualBudget as localReplaceAnnualBudget,replaceAnnualLedger as localReplaceAnnualLedger} from './db.js';
 import {LINKS,MENU,MEETING,DEN_NAMES,isoToday,makeId,money,esc,safeUrl,niceDate,summary,completion,csvParse,brief} from './data.js';
 import {authorize,connected,disconnect,selectFolder,uploadReceipt,uploadEncryptedBackup} from './drive.js';
@@ -16,7 +21,7 @@ import {normalizeGoogleConfiguration} from './google-config.js';
 import {EQUIPMENT_CATEGORIES,normalizeEquipment,queryEquipment,equipmentCsv} from './equipment-utils.js';
 import {PACK_CLOUD_CONFIG} from './cloud-config.js';
 import {resolveCloudConfiguration,hasCloudConfiguration} from './cloud-config-validation.js';
-import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,watchCloudChanges,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest,fetchPackSettings,savePackSetting} from './cloud.js';
+import {cloudState,sharedTable,configureCloud,syncCloudIdentity,googleCloudLogin,googleCloudLogout,fetchCloudRows,saveCloudRow,deleteCloudRow,migrateLocalRecords,listMembers,listInvites,watchCloudChanges,addLeaderInvite,updateLeaderRole,listFamilyForms,createFamilyForm,getFamilyResponses,inviteFamily,publicFamilyRequest,fetchPackSettings,savePackSetting,replaceCloudLedgerSnapshot} from './cloud.js';
 import {cloudSettingsPanel} from './cloud-panel.js';
 import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
 import {familyResponseCsv} from './family-ui.js';
@@ -26,7 +31,7 @@ const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
 let pwaInstallPrompt=null;
 const dbState=Object.fromEntries(TABLES.map(t=>[t,t==='settings'?[]:[]]));
-const ui={page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name',equipmentQuery:'',equipmentCategory:'all',equipmentSort:'name-asc',equipmentExport:'filtered',editEquipment:'',cloudError:'',cloudMembers:[],cloudInvites:[],familyForms:[],familyActive:'',familyResults:null,familySearch:'',familyLink:'',familyData:null,familySent:false,denChoice:''};
+const ui={workflow:{available:false,requests:[],audit:[],notifications:[]},pickerOpen:false,budgetEditId:'',familyPreview:null,familySending:false,page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name',equipmentQuery:'',equipmentCategory:'all',equipmentSort:'name-asc',equipmentExport:'filtered',editEquipment:'',cloudError:'',cloudMembers:[],cloudInvites:[],familyForms:[],familyActive:'',familyResults:null,familySearch:'',familyLink:'',familyData:null,familySent:false,denChoice:''};
 const now=()=>Date.now();
 const cloudActive=()=>Boolean(cloudState().member);
 async function writeSetting(key,value){
@@ -70,9 +75,7 @@ async function replaceAnnualBudget(payload){
 }
 async function replaceAnnualLedger({previous=[],next=[],year,importedAt}){
  if(!cloudActive())return localReplaceAnnualLedger({previous,next,year,importedAt});
- for(const prior of previous)await remove('financeLedger',prior.id);
- for(const record of next)await put('financeLedger',record);
- await writeSetting('financeLedgerImportedAt:'+year,importedAt);
+ return replaceCloudLedgerSnapshot(year,next,importedAt);
 }
 async function setupCloud(){
  const cfg=cloudSettings();if(!hasCloudConfiguration(cfg))return;
@@ -82,9 +85,9 @@ async function setupCloud(){
 function ensureRealtime(){
  if(!cloudActive())return;
  watchCloudChanges(()=>{
-  const typing=root.querySelector('input:focus,textarea:focus,select:focus');
+  const typing=hasPendingForm(root,ui.pickerOpen);
   if(document.hidden||typing){ui.cloudChanged=true;return}
-  refresh().catch(e=>console.warn('Realtime refresh failed',e));
+  refresh(true).catch(e=>console.warn('Realtime refresh failed',e));
  });
 }
 async function loadCloudAdmin(){
@@ -96,7 +99,7 @@ async function loadFamilyForms(){
  ui.familyForms=await listFamilyForms();
 }
 async function openFamilyForm(id){
- ui.familyActive=id;ui.familyResults=id?await getFamilyResponses(id):null;ui.familyLink='';ui.familySearch='';render();
+ ui.familyPreview=null;ui.familyActive=id;ui.familyResults=id?await getFamilyResponses(id):null;ui.familyLink='';ui.familySearch='';render();
 }
 async function loadFamilyToken(token){
  if(!cloudState().configured){ui.cloudError='Family RSVP backend is not configured on this website.';render();return}
@@ -138,7 +141,7 @@ const rosterRows=()=>{const q=ui.rosterFilter.trim().toLowerCase();return groupS
 const intro=(kicker,title,desc,right='')=>`<div class="page-head"><div><span class="eyebrow">${esc(kicker)}</span><h1>${esc(title)}</h1><p>${esc(desc)}</p></div>${right?`<div class="no-print">${right}</div>`:''}</div>`;
 const note=(msg,warning=false)=>`<div class="note${warning?' warn':''}">${msg}</div>`;
 
-async function refresh(){
+async function refresh(background=false){
  const result=await Promise.all(TABLES.map(t=>list(t)));
  TABLES.forEach((t,i)=>dbState[t]=result[i]);
  if(cloudActive()&&['admin','cubmaster','treasurer'].includes(cloudState().member.role)){
@@ -147,6 +150,11 @@ async function refresh(){
   for(const entry of shared)byKey.set(entry.key,entry);
   dbState.settings=[...byKey.values()];
  }
+ if(cloudActive()){
+  try{ui.workflow=await loadTransactionWorkflow()}catch(e){ui.workflow={available:false,requests:[],audit:[],notifications:[],error:e.message}}
+  const combined=combinedLedger(dbState.financeLedger,dbState.financeTags,ui.workflow.requests);dbState.financeLedger=combined.ledger;dbState.financeTags=combined.tags;
+ }else ui.workflow={available:false,requests:[],audit:[],notifications:[]};
+ if(background&&hasPendingForm(root,ui.pickerOpen)){ui.cloudChanged=true;return}
  render();
 }
 function settings(key){return dbState.settings.find(s=>s.key===key)?.value||'';}
@@ -190,7 +198,7 @@ function render(){
   ${MENU.map(m=>`<button class="nav-link${ui.page===m.id?' active':''}" data-nav="${m.id}"><span class="emoji">${m.emoji}</span>${esc(m.label)}</button>`).join('')}</nav>
   <div class="sidebar-footer"><small>Pack 179 · Built for the people making Scouting happen.<br>Records sync only after approved Google sign-in and backend setup.</small><button data-nav="settings">⚙ &nbsp; Settings & Drive</button></div></aside>
   <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-nav="home" aria-label="Dashboard">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">${cloudActive()?('● Shared Pack workspace'+(ui.cloudChanged?' · Refresh recommended':'')):'● Local / setup mode'}</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
-  <div class="content">${view()}</div></main>
+  <div class="content">${ui.workflow.notifications.some(n=>!n.seen_at)?`<div class="note">New transaction submissions need review. ${btn('Open approvals','transaction-open','btn btn-small')}</div>`:''}${view()}</div></main>
   <nav class="mobile-bottom no-print" aria-label="Mobile navigation">${[{id:'home',emoji:'🏡',name:'Home'},{id:'calendar',emoji:'🗓️',name:'Calendar'},{id:'budget',emoji:'📊',name:'Finance'},{id:'receipts',emoji:'🧾',name:'Receipts'},{id:'events',emoji:'✅',name:'Events'}].map(t=>`<button class="mobile-tab${ui.page===t.id?' active':''}" data-nav="${t.id}"><span class="emoji">${t.emoji}</span>${t.name}</button>`).join('')}</nav>
  </div>`;
 }
@@ -231,7 +239,7 @@ function calendar(){
  ${link(LINKS.scoutbook,'Open Scoutbook Plus','btn btn-ghost btn-full')}
  <div class="privacy-strip">Best approach: enter official events in Scoutbook and subscribe to its .ics calendar in Google Calendar. Do not duplicate official events in two systems.</div></section></div>`;
 }
-function budget(){return financeView({state:dbState,ui,esc,money,settings,intro,note,btn,link,field,select,textarea,empty,upcoming:upcomingRecords,year:activeYear(),dues:annualDues(),shared:cloudActive()});}
+function budget(){return financeView({state:dbState,ui,esc,money,settings,intro,note,btn,link,field,select,textarea,empty,upcoming:upcomingRecords,year:activeYear(),dues:annualDues(),shared:cloudActive(),workflow:ui.workflow,role:cloudState().member?.role,userId:cloudState().user.id});}
 function budgetForm(){return `<h3>Add planning entry</h3><form data-form="budget" class="stack"><div class="form-grid">${field('Category','category','text','','required maxlength="100"')}${field('Planned amount ($)','planned','number','0','min="0" step="0.01" required')}${field('Entered actual ($)','actual','number','0','min="0" step="0.01" required')}${field('Notes','note')}</div><div class="form-actions"><button class="btn" type="submit">Save entry</button>${btn('Cancel','cancel-form')}</div></form>`}
 function receiptForm(){return `<section class="panel"><h2>Capture a receipt</h2><p>Save a photo or PDF into a local upload queue. Upload to the selected Pack Drive folder when Google access is connected.</p>
  <form data-form="receipt" class="stack"><div class="field"><label for="receiptFile">Receipt image or PDF · 15 MB max</label><input class="input" id="receiptFile" name="file" type="file" accept="image/*,application/pdf" required></div><div class="form-grid">${field('Vendor / store (optional)','vendor')}${field('Amount ($, optional)','amount','number','','min="0" step="0.01"')}${select('Related event','eventId',eventOptions(),ui.receiptEventId||'')}${field('Description (optional)','note')}</div><div class="form-actions"><button class="btn" type="submit">🧾 Save receipt to upload queue</button></div></form></section>`}
@@ -282,6 +290,7 @@ function eventDetail(e){
  const equipmentNeeded=(e.equipmentIds||[]).map(id=>dbState.equipment.find(x=>x.id===id)).filter(Boolean);
  return `<div class="row-between no-print" style="margin-bottom:20px">${btn('← All events','back-events','btn btn-ghost')}${btn('Delete event','delete-event','btn btn-danger btn-small',`data-id="${e.id}"`)}</div>
  ${intro('Event workspace',e.title,`${niceDate(e.date)} · ${e.location||'Location not recorded'} · Lead: ${e.owner||'Unassigned'}`)}
+ <section class="panel stack" style="margin-bottom:18px"><h2>Event lead &amp; details</h2>${cloudActive()&&!['admin','cubmaster'].includes(cloudState().member.role)?`<p><strong>Lead:</strong> ${esc(e.owner||'Unassigned')}</p>`:`<form data-form="event-details" data-id="${esc(e.id)}" class="stack"><div class="form-grid">${field('Event lead','owner','text',e.owner||'','maxlength="120"')}${e.googleEventId?'':field('Date','date','date',e.date||'')+field('Location','location','text',e.location||'','maxlength="240"')}</div><button class="btn btn-small" type="submit">Save event details</button></form>`}<p class="meta">Lead assignment is separate from checklist responsibilities.</p></section>
  ${e.googleEventId?'<section class="panel stack" style="margin-bottom:18px"><div class="row-between"><strong>↻ Linked to Google Calendar</strong>'+(e.calendarUrl?link(e.calendarUrl,'View original event','btn btn-outline btn-small'):'')+'</div><p class="meta">The title, date and location follow Google Calendar on refresh. Notes, tasks, receipts and budgets stay in PackOps.</p>'+(e.description?'<p>'+esc(e.description)+'</p>':'')+'</section>':''}
  <div class="split"><div class="stack"><section class="panel"><div class="row-between"><h2>Preparation checklist</h2>${btn('+ Add checklist task','show-event-task','btn btn-small')}</div>${rate!==null?`<div class="preview-strip" style="margin:12px 0"><strong>${rate}% of recorded tasks complete</strong><span class="pill">${tasks.length} checklist items</span></div><div class="progress" style="margin-bottom:12px"><span style="width:${rate}%"></span></div>`:note('No tasks yet. Readiness is unknown until checklist tasks are entered.',true)}${tasks.length?tasks.map(taskRow).join(''):''}</section>${ui.form==='task'||ui.form==='edit-task'?taskForm(ui.editTask?dbState.tasks.find(t=>t.id===ui.editTask):null,e.id):''}
  <section class="panel"><h2>Event notes & links</h2><form data-form="event-notes" data-id="${e.id}" class="stack">${textarea('Planning notes','notes',e.notes,'rows="8"')}${textarea('Document or Scoutbook URLs, one per line','links',e.links||'','rows="4"')}<div class="form-actions"><button class="btn" type="submit">Save notes</button></div></form>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).length?`<div class="divider"></div><h3>Linked resources</h3>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).map(x=>`<p style="overflow-wrap:anywhere">${link(x,short(x,60),'btn btn-outline btn-small')}</p>`).join('')}`:''}</section></div>
@@ -296,7 +305,7 @@ function eventDetail(e){
  <p>Reference existing Pack inventory rather than maintaining a duplicate list. These links are shared with approved leaders once cloud sync is enabled.</p>
  ${equipmentNeeded.length?equipmentNeeded.map(item=>`<div class="row-between list-item"><div><strong>${esc(item.name)}</strong><div class="meta">${esc(item.category||'General Equipment')} · Qty ${esc(String(item.quantity??1))} · ${esc(item.location||'Location unknown')}</div></div>${btn('Remove','event-remove-equipment','btn btn-danger btn-small',`data-id="${esc(item.id)}"`)} </div>`).join(''):'<p class="meta">No inventory items linked to this event.</p>'}
  <form data-form="event-equipment" data-id="${esc(e.id)}" class="row wrap">${select('Add from inventory','equipmentId',dbState.equipment.map(item=>[item.id,item.name+' · '+(item.location||'Location unknown')]))}<button class="btn btn-small" type="submit" ${dbState.equipment.length?'':'disabled'}>Add equipment</button></form>
- </section><section class="panel"><h2>Event attachments</h2><p>Attach photos, PDFs, route maps or reference documents. These are stored locally in this first version.</p><form data-form="attachment" data-id="${e.id}"><div class="field"><input type="file" name="file" class="input" required aria-label="Event attachment" accept="image/*,application/pdf,.doc,.docx,.xlsx,.csv,.txt"></div><div class="form-actions"><button class="btn btn-small" type="submit">Attach file</button></div></form>${att.length?att.map(a=>`<div class="list-item"><div class="row-between"><strong style="font-size:12px;overflow-wrap:anywhere">📎 ${esc(a.fileName)}</strong><div class="row">${btn('Open','open-attachment','btn btn-ghost btn-small',`data-id="${a.id}"`)}${btn('×','delete-attachment','btn btn-danger btn-small',`data-id="${a.id}"`)}</div></div></div>`).join(''):`<p class="muted">No files attached yet.</p>`}</section>
+ </section><section class="panel"><h2>Event attachments</h2><p>Choose a file, then tap Attach file. Files up to 15 MB are saved on this device. To share, upload the file to your restricted Pack Drive folder and add its link in Event notes &amp; links.</p><form data-form="attachment" data-id="${e.id}"><div class="field"><input type="file" name="file" class="input" required aria-label="Event attachment"></div><div class="form-actions"><span class="meta" data-file-status>No file selected</span><button class="btn btn-small" type="submit">Attach file</button></div></form>${att.length?att.map(a=>`<div class="list-item"><div class="row-between"><strong style="font-size:12px;overflow-wrap:anywhere">📎 ${esc(a.fileName)}</strong><div class="row">${btn('Open','open-attachment','btn btn-ghost btn-small',`data-id="${a.id}"`)}${btn('×','delete-attachment','btn btn-danger btn-small',`data-id="${a.id}"`)}</div></div></div>`).join(''):`<p class="muted">No files attached yet.</p>`}</section>
  <section class="panel stack"><h3>Official event</h3><p>Set the official calendar entry and RSVP through Scoutbook Plus. Paste its link into your event notes when available.</p>${link(LINKS.scoutbook,'Open Scoutbook Plus','btn btn-outline btn-full')}${link(LINKS.packDrive,'Open Pack Drive','btn btn-ghost btn-full')}</section></div></div>`;
 }
 function events(){const chosen=ui.eventId&&findEvent(ui.eventId);if(chosen)return eventDetail(chosen);
@@ -360,7 +369,7 @@ function families(){
  const state=cloudState();
  const denChoices=state.member?.role==='den_leader'?(state.member.den_scopes||[]):DEN_NAMES;
  return familyManagerView({forms:ui.familyForms,responses:ui.familyResults,activeId:ui.familyActive,
- lastLink:ui.familyLink,query:ui.familySearch,events:dbState.events,denChoices,cloudReady:cloudActive(),
+ roster:groupScouts(dbState.roster),preview:ui.familyPreview,sending:ui.familySending,lastLink:ui.familyLink,query:ui.familySearch,events:dbState.events,denChoices,cloudReady:cloudActive(),
  esc,btn,field,select,intro,note,money});
 }
 function familyPublicPage(){
@@ -411,7 +420,7 @@ function settingsPage(){
  <p>Configure original financial documents separately for each Scout year. These are private Drive links and read-only sources, not files stored in the public PackOps repository.</p>
  <form data-form="drive-year-sources" class="stack">
  ${field('Official Scout credit Google Sheet','creditUrl','url',settings('financeCreditsUrl:'+activeYear())||(activeYear()==='2026-27'?LINKS.scoutCredits:''))}
- ${field('Treasurer ledger workbook','ledgerUrl','url',settings('financeLedgerUrl:'+activeYear())||(activeYear()==='2026-27'?LINKS.ledger:''))}
+ ${field('Treasurer ledger Google Sheet','ledgerUrl','url',activeYear()==='2026-27'&&(!settings('financeLedgerUrl:'+activeYear())||settings('financeLedgerUrl:'+activeYear()).includes('/1tETtLSogYC3RFvHj_uDbAxgyGu9QcqXO/'))?LINKS.ledger:settings('financeLedgerUrl:'+activeYear()))}
  ${field('Approved budget / planning document (optional)','budgetUrl','url',settings('financeBudgetUrl:'+activeYear()))}
  ${field('Restricted receipt folder (optional)','receiptsUrl','url',settings('financeReceiptsUrl:'+activeYear())||(activeYear()==='2026-27'?LINKS.receipts2026:''))}
  <button class="btn" type="submit">Save Drive sources for ${esc(activeYear())}</button></form>
@@ -436,6 +445,65 @@ function askDelete(message){return window.confirm(message)}
 async function handleAction(action,trigger){
  const id=trigger.dataset.id;
  switch(action){
+  case 'transaction-open':ui.financeTab='transactions';route('budget');return;
+  case 'transaction-refresh':await refresh();return;
+  case 'transaction-read':await markTransactionNotificationsRead();await refresh();return;
+  case 'transaction-preview-post':{
+   const r=ui.workflow.requests.find(r=>r.id===id);if(!r)throw Error('Request not found');
+   if(!window.confirm('Add this verified transaction as one new row in the official ledger?\n\nItem: '+r.description+'\nDate: '+r.transaction_date+'\ncost deleted: '+money(r.direction==='out'?r.amount:0)+'\ndeposit added: '+money(r.direction==='in'?r.amount:0)+'\nReceipt: '+(r.receipt_url||'None')+'\nAccount Balance Remaining: calculated by the ledger\n\nThis writes to the official ledger.'))return;
+   trigger.disabled=true;
+   try{await postTransaction(id);await refresh();notify('Official ledger posting confirmed. Budget/event actuals updated.')}finally{if(trigger.isConnected)trigger.disabled=false}
+   return;
+  }
+  case 'transaction-sync-ledger':{
+   trigger.disabled=true;
+   try{
+    const result=await fetchOfficialLedger(activeYear());
+    if(!Array.isArray(result.values))throw Error('Ledger returned no rows');
+    const csv=result.values.map(row=>row.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\n');
+    const rows=parseLedgerCsv(csv).map(r=>({...r,sourceYear:activeYear()}));
+    const expected=ui.workflow.requests.filter(r=>r.status==='posted'&&r.source_year===activeYear()).map(r=>'packops:'+r.id);
+    const found=new Set(rows.map(r=>r.id));
+    if(expected.some(id=>!found.has(id)))throw Error('The official snapshot is missing a previously posted PackOps ID. Reconcile the ledger before refreshing.');
+    const review=ledgerImportReview(rows);
+    if(review.balanceWarnings.length)throw Error('Official ledger has inconsistent running balances. Ask a reviewer to check rows '+review.balanceWarnings.join(', '));
+    if(!window.confirm('Refresh the PackOps snapshot from '+rows.length+' official ledger rows? Existing budget plans and the official ledger will not be edited.'))return;
+    await replaceAnnualLedger({previous:dbState.financeLedger.filter(r=>scoutAccountYear(r)===activeYear()),next:rows,year:activeYear(),importedAt:new Date().toISOString()});
+    await refresh();notify('Official ledger snapshot refreshed');
+   }finally{if(trigger.isConnected)trigger.disabled=false}return;
+  }
+
+  case 'finance-edit-budget':ui.budgetEditId=id;ui.financeForm='budget';render();return;
+  case 'finance-duplicate-budget':{
+   const old=dbState.budget.find(r=>r.id===id);if(!old||(old.year||'2026-27')!==activeYear())throw Error('Choose an allocation in the current year');
+   await put('budget',{...old,id:makeId(),detail:(old.detail||old.category)+' (copy)',createdAt:now()});await refresh();return;
+  }
+  case 'wizard-add-expense':case 'wizard-remove-expense':{
+   const form=root.querySelector('[data-form="wizard-expenses"]');
+   ui.wizardExpenses=readWizardExpenses(form,ui.wizardExpenses);
+   if(action==='wizard-add-expense')ui.wizardExpenses.push({key:makeId(),category:'Other',detail:'New expense',planned:0,origin:'custom entry'});
+   else if(ui.wizardExpenses.length>1)ui.wizardExpenses.splice(Number(id),1);
+   else throw Error('Keep at least one expense');
+   render();return;
+  }
+  case 'family-cancel-preview':if(!ui.familySending){ui.familyPreview=null;render()}return;
+  case 'family-send-preview':{
+   const preview=ui.familyPreview;if(!preview||ui.familySending)return;
+   ui.familySending=true;render();
+   try{
+    for(const recipient of preview.recipients.filter(r=>r.status==='pending')){
+     // Mark attempted before awaiting: uncertain network outcomes are never resent automatically.
+     recipient.status='sending';
+     try{const result=await inviteFamily(preview.formId,recipient.label,recipient.email,preview.sendEmail);
+      recipient.url=result.url;recipient.status=result.emailed?'accepted by email provider':result.deliveryStatus==='email-failed'?'email failed — use private link':'private link created';
+      if(result.errorMessage)recipient.error=result.errorMessage;
+     }catch(e){recipient.status='not confirmed';recipient.error=e.message}
+    }
+    ui.familyResults=await getFamilyResponses(preview.formId);
+   }finally{ui.familySending=false;render()}
+   return;
+  }
+
   case 'cloud-sign-in':await googleCloudLogin();return;
   case 'cloud-retry':await setupCloud();await refresh();return;
   case 'cloud-sign-out':await googleCloudLogout();ui.cloudMembers=[];ui.cloudInvites=[];await refresh();route('settings');return;
@@ -516,9 +584,9 @@ async function handleAction(action,trigger){
    await refresh();notify('Imported template planning lines as unapproved drafts');return;
   }
   case 'finance-goto-builder':ui.financeTab='builder';render();return;
-  case 'finance-new-budget':ui.financeForm='budget';render();return;
-  case 'finance-close':ui.financeForm='';render();return;
-  case 'finance-delete-budget':if(askDelete('Remove this LOCAL planning budget line?')){await remove('budget',id);await refresh()}return;
+  case 'finance-new-budget':ui.budgetEditId='';ui.financeForm='budget';render();return;
+  case 'finance-close':ui.budgetEditId='';ui.financeForm='';render();return;
+  case 'finance-delete-budget':if(askDelete('Remove this planning allocation? Actual ledger entries will stay unchanged.')){await remove('budget',id);await refresh()}return;
   case 'finance-baseline':{
    if(!askDelete('Record the current LOCAL budget as your reviewed baseline? This does not constitute committee approval or update Google Drive.'))return;
    const year=activeYear(),ledger=dbState.financeLedger.filter(t=>scoutAccountYear(t)===year);
@@ -544,7 +612,8 @@ async function handleAction(action,trigger){
   case 'finance-export-adjustments':{
    if(!dbState.financeAdjustments.length)throw Error('No proposed adjustments found');
    if(!askDelete('Export Scout financial adjustment proposals for the authorized treasurer? Treat the CSV as confidential.'))return;
-   const rows=dbState.financeAdjustments.map(r=>({Scout:dbState.financeAccounts.find(x=>x.id===r.accountId)?.name||'Unmatched',Date:r.date,Amount:r.delta,Reason:r.reason,Status:'Proposed - NOT POSTED'}));
+   const visible=new Set(dbState.financeAccounts.filter(a=>scoutAccountYear(a)===activeYear()&&(ui.accountDen==='all'||a.den===ui.accountDen)&&[a.name,a.den].some(v=>String(v||'').toLowerCase().includes(ui.accountQuery.toLowerCase()))).map(a=>a.id));
+   const rows=dbState.financeAdjustments.filter(r=>visible.has(r.accountId)).map(r=>({Scout:dbState.financeAccounts.find(x=>x.id===r.accountId)?.name||'Unmatched',Date:r.date,Amount:r.delta,Reason:r.reason,Status:'Proposed - NOT POSTED'}));
    downloadCsv(csvExport(rows,['Scout','Date','Amount','Reason','Status']),`Pack179_Scout_Adjustment_Proposals_${isoToday()}.csv`);return;
   }
   case 'finance-clear-accounts':if(askDelete('Remove the local Scout credit snapshot from this device? Official Drive records are unchanged.')){for(const item of dbState.financeAccounts)await remove('financeAccounts',item.id);await writeSetting('financeAccountsImportedAt:'+activeYear(),'');await refresh();notify('Local Scout credit copy deleted')}return;
@@ -643,7 +712,7 @@ async function handleAction(action,trigger){
    await refresh();return;
   }
   case 'event-go-finance':ui.financeTab='builder';route('budget');return;
-  case 'event-reimburse':ui.financeTab='reimbursements';ui.reimbursementEventId=ui.eventId;route('budget');return;
+  case 'event-reimburse':ui.financeTab=cloudActive()?'transactions':'reimbursements';ui.reimbursementEventId=ui.eventId;route('budget');return;
   case 'event-receipt':ui.receiptEventId=ui.eventId;route('receipts');return;
   case 'edit-task':ui.form='edit-task';ui.editTask=id;render();return;
   case 'toggle-task':{const t=dbState.tasks.find(t=>t.id===id);if(t){await put('tasks',{...t,status:t.status==='done'?'open':'done',updatedAt:now()});await refresh()}return;}
@@ -720,6 +789,20 @@ function openBlob(blob){const url=URL.createObjectURL(blob);const opened=window.
 async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
+  case 'transaction-submit':{
+   const draft=transactionDraft({...Object.fromEntries(new FormData(form)),year:activeYear()});
+   // Hold one submission ID through retries, including ambiguous network timeouts.
+   const id=form.dataset.submissionId||(form.dataset.submissionId=crypto.randomUUID());
+   await submitTransaction(id,draft);
+   let message='Submitted. Finance reviewers have an in-app notification.';
+   try{const result=await notifyTransaction(id);message+=' '+result.message}catch{message+=' Email could not be confirmed; the submission is saved.'}
+   await refresh();notify(message);return;
+  }
+  case 'transaction-review':{
+   await reviewTransaction(form.dataset.id,Number(form.dataset.version),f('action'),f('note'));
+   await refresh();notify('Review saved with your identity and timestamp');return;
+  }
+
   case 'cloud-config':{
    if(cloudSettings().managed)throw Error('The Pack backend is managed by the website administrator.');
    const projectUrl=f('projectUrl'),publishableKey=f('publishableKey'),packId=f('packId');
@@ -730,9 +813,13 @@ async function handleForm(form){
    ui.cloudError='';await loadCloudAdmin();await loadFamilyForms();await refresh();notify('Secure backend configured. Use Continue with Google if needed.');return;
   }
   case 'cloud-invite-leader':{
-   const denScopes=f('dens').split(',').map(x=>x.trim()).filter(Boolean);
-   await addLeaderInvite({email:f('email'),role:f('role'),denScopes});
-   await loadCloudAdmin();render();notify('Leader invitation approved. Ask that leader to sign into PackOps with this email.');return;
+   const email=f('email').toLowerCase(),send=!!form.elements.sendEmail?.checked;
+   if(!window.confirm('Approve '+email+' as '+f('role')+'?\nDens: '+(f('dens')||'None')+(send?'\nSend a PackOps sign-in invitation to this email.':'\nNo email will be sent. Share the PackOps link yourself.')))return;
+   await addLeaderInvite({email,role:f('role'),denScopes:f('dens').split(',').map(x=>x.trim()).filter(Boolean)});
+   let message='Leader access approved.';
+   if(send){try{const result=await sendLeaderInvite(email);message+=' '+result.message}catch(e){message+=' Email not confirmed: '+e.message+' Share the PackOps link manually.'}}
+   else message+=' Share the PackOps link and ask them to choose Continue with Google.';
+   await loadCloudAdmin();render();notify(message);return;
   }
   case 'family-form-create':{
    if(!cloudActive())throw Error('Sign in and activate the Pack shared database first');
@@ -744,13 +831,12 @@ async function handleForm(form){
    const item=await createFamilyForm({title:f('title'),kind,description:f('description'),event_id:f('eventId')||null,den_scope:den||null,questions:kind==='rsvp'?[]:[{label:kind==='poll'?'Choose an option':'Choose a position',options}],status:'open'});
    await loadFamilyForms();await openFamilyForm(item.id);notify('Family response form published. Invite households individually.');return;
   }
-  case 'family-invite':{
-   const sendEmail=form.elements.sendEmail?.checked||false;
-   const result=await inviteFamily(f('formId'),f('recipientLabel'),f('recipientEmail'),sendEmail);
-   ui.familyLink=result.url;
-   ui.familyResults=await getFamilyResponses(f('formId'));
-   render();
-   notify(result.emailed?'Invitation email sent':'Private link generated. Copy it and share with the intended household.');return;
+  case 'family-invite':case 'family-roster-invite':{
+   const selected=ui.familyForms.find(r=>r.id===f('formId'));
+   const recipients=kind==='family-invite'?[{label:f('recipientLabel'),email:f('recipientEmail')}]:
+    familyRecipients(groupScouts(dbState.roster),selected?.den_scope||'').filter(r=>new FormData(form).getAll('recipient').includes(r.email));
+   ui.familyPreview=invitationPreview(selected,recipients,!!form.elements.sendEmail?.checked);
+   render();return;
   }
   case 'family-public-response':{
    if(!ui.familyToken)throw Error('Open a private invitation link first');
@@ -795,7 +881,7 @@ async function handleForm(form){
   case 'backup-export':{
    if(cloudActive()&&!['admin','cubmaster'].includes(cloudState().member.role))throw Error('Only Pack administrators can export a shared snapshot containing potentially sensitive youth records');
    const snapshot=cloudActive()?Object.fromEntries(TABLES.map(t=>[t,dbState[t]])):null;
-   const message=await exportPackOpsBackup(form,settings,snapshot);
+   const message=await exportPackOpsBackup(form,settings,snapshot,cloudActive()?{requests:ui.workflow.requests,audit:ui.workflow.audit,notifications:ui.workflow.notifications}:null);
    if(message)notify(message);return;
   }
   case 'backup-restore':if(await restorePackOpsFromFile(form)){ui.rosterSelected.clear();ui.googleEvents=[];ui.calendarFetchedAt=0;await refresh();notify('PackOps restored. Reconnect Google services.')}return;
@@ -814,11 +900,7 @@ async function handleForm(form){
   }
   case 'wizard-expenses':{
    if(!ui.wizardConfig||!ui.wizardExpenses?.length)throw Error('Complete the earlier wizard steps first');
-   const expenseRows=ui.wizardExpenses.map((line,i)=>{
-    const raw=f('expense_'+i),planned=Number(raw);
-    if(raw===''||!Number.isFinite(planned)||planned<0||planned>1e9)throw Error('Enter a valid amount for '+line.detail);
-    return {...line,planned:Math.round(planned*100)/100};
-   });
+   const expenseRows=readWizardExpenses(form,ui.wizardExpenses);
    wizardPreview(ui.wizardConfig,expenseRows);
    ui.wizardExpenses=expenseRows;ui.wizardStep=3;render();return;
   }
@@ -831,8 +913,11 @@ async function handleForm(form){
    await refresh();notify('Event budget item saved as a draft');return;
   }
   case 'finance-budget':{
-   const v=Number(f('planned'));if(!Number.isFinite(v)||v<0||v>1e9)throw Error('Enter a valid planning amount');
-   await put('budget',{id:makeId(),category:f('category'),type:f('type'),planned:Math.round(v*100)/100,eventId:f('eventId'),year:f('year'),note:f('note'),createdAt:now()});ui.financeForm='';break;
+   const old=form.dataset.editId?dbState.budget.find(r=>r.id===form.dataset.editId):null;
+   if(form.dataset.editId&&!old)throw Error('This allocation no longer exists. Refresh and try again.');
+   const draft=budgetDraft(Object.fromEntries(new FormData(form)),old,activeYear());
+   if(draft.eventId&&!dbState.events.some(r=>r.id===draft.eventId))throw Error('Choose an existing event');
+   await put('budget',{...draft,id:old?.id||makeId(),createdAt:old?.createdAt||now(),updatedAt:now()});ui.budgetEditId='';ui.financeForm='';break;
   }
   case 'receipt-item':{
    const receipt=dbState.receipts.find(r=>r.id===form.dataset.id);
@@ -875,7 +960,10 @@ async function handleForm(form){
    const last=review.lastBalance===null?'Not included':money(review.lastBalance);
    const audit=review.balanceWarnings.length?'\nWARNING: '+review.balanceWarnings.length+' running-balance discrepancies; check exported row order.':'';
    if(!askDelete('TREASURER LEDGER IMPORT — '+year+'\n'+review.rows+' rows\nDeposits: '+money(review.deposits)+'\nWithdrawals: '+money(review.withdrawals)+'\nLatest listed balance: '+last+(review.lastBalanceDate?' ('+review.lastBalanceDate+')':'')+'\n\nDeposits include transfers and Scout-credit movements until reviewed. The official Drive ledger will NOT be edited.'+audit+'\n\nReplace only this year’s LOCAL ledger snapshot?'))return;
-   const next=raw.map(row=>({...row,id:year==='2026-27'?row.id:year+':'+row.id,sourceYear:year}));
+   const next=raw.map(row=>({...row,id:row.id.startsWith('packops:')||year==='2026-27'?row.id:year+':'+row.id,sourceYear:year}));
+   const expected=ui.workflow.requests.filter(r=>r.status==='posted'&&r.source_year===year).map(r=>'packops:'+r.id);
+   const found=new Set(next.map(r=>r.id));
+   if(expected.some(id=>!found.has(id)))throw Error('The CSV is missing a posted PackOps transaction. Reconcile the official ledger before importing.');
    await replaceAnnualLedger({previous:dbState.financeLedger.filter(r=>scoutAccountYear(r)===year),next,year,importedAt:new Date().toISOString()});
    await refresh();ui.financeTab='ledger';render();notify('Ledger imported. Review deposits as dues, occasional donations, transfers or restricted credits.');return;
   }
@@ -905,10 +993,12 @@ async function handleForm(form){
    await put('events',{...ev,equipmentIds:[...new Set([...(ev.equipmentIds||[]),id])],updatedAt:now()});
    await refresh();notify('Equipment linked to event');return;
   }
+  case 'event-details':{const old=findEvent(form.dataset.id);if(!old)throw Error('Event not found');await put('events',{...old,owner:f('owner'),...(!old.googleEventId?{date:f('date'),location:f('location')}:{ }),updatedAt:now()});break;}
   case 'event-notes':{const old=findEvent(form.dataset.id);if(old)await put('events',{...old,notes:f('notes'),links:f('links'),updatedAt:now()});break;}
   case 'attachment':{
-   const file=form.elements.file.files?.[0];if(!file)throw Error('Choose an attachment');if(file.size>15*1024*1024)throw Error('Attachments are limited to 15 MB in this version.');
-   await put('attachments',{id:makeId(),eventId:form.dataset.id,fileName:file.name,mimeType:file.type,blob:file,createdAt:now()});break;
+   const record=await prepareAttachment(form.elements.file.files?.[0],form.dataset.id,makeId());
+   try{await localPut('attachments',record)}catch{throw Error('Could not save the attachment. Check available phone storage; your other records are unchanged.')}
+   ui.pickerOpen=false;await refresh();notify('Attachment saved on this device. Add a Drive link to share it with leaders.');return;
   }
   case 'receipt':{
    const file=form.elements.file.files?.[0];if(!file)throw Error('Choose a receipt');if(file.size>15*1024*1024)throw Error('Receipts are limited to 15 MB');
@@ -946,10 +1036,11 @@ async function handleForm(form){
   }
   default:return;
  }
- ui.form='';ui.editTask='';await refresh();notify('Saved locally on this device');
+ ui.form='';ui.editTask='';await refresh();notify(cloudActive()?'Saved to the Pack workspace':'Saved locally on this device');
 }
 root.addEventListener('click',async event=>{
  const nav=event.target.closest('[data-nav]');if(nav){route(nav.dataset.nav);return;}
+ if(event.target.matches('input[type=file]')){ui.pickerOpen=true;return;}
  const action=event.target.closest('[data-action]');if(!action)return;
  try{await handleAction(action.dataset.action,action)}catch(error){console.error(error);notify(String(error?.message||error),true)}
 });
@@ -960,6 +1051,7 @@ root.addEventListener('submit',async event=>{
 });
 root.addEventListener('change',async event=>{
  const target=event.target;
+ if(target.matches('input[type=file]')){ui.pickerOpen=false;const status=target.form?.querySelector('[data-file-status]');if(status)status.textContent=target.files?.[0]?target.files[0].name+' — ready to attach':'No file selected';if(target.form)target.form.dataset.dirty='true';return;}
  if(target.dataset.change==='den-choice'){ui.denChoice=target.value;render();return}
  if(target.dataset.change==='finance-account-den'){ui.accountDen=target.value;render();return}
  if(target.dataset.change==='finance-account-sort'){ui.accountSort=target.value;render();return}
@@ -991,6 +1083,7 @@ root.addEventListener('change',async event=>{
  }
 });
 root.addEventListener('input',event=>{
+ if(event.target.form)event.target.form.dataset.dirty='true';
  if(event.target.name==='family-search'){
   const val=event.target.value,pos=event.target.selectionStart;ui.familySearch=val;render();const el=root.querySelector('[name="family-search"]');if(el){el.focus();if(pos!==null)el.setSelectionRange(pos,pos)}return;
  }
@@ -1006,10 +1099,11 @@ root.addEventListener('input',event=>{
   const el=root.querySelector('[name="roster-search"]');if(el){el.focus();el.setSelectionRange(index,index)}
  }
 });
-window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();pwaInstallPrompt=event;render()});
+root.addEventListener('cancel',event=>{if(event.target.matches('input[type=file]'))ui.pickerOpen=false},true);
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();pwaInstallPrompt=event;if(!hasPendingForm(root,ui.pickerOpen))render()});
 window.addEventListener('appinstalled',()=>{pwaInstallPrompt=null;render();notify('PackOps installed as a standalone app')});
 window.addEventListener('hashchange',restoreRoute);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&cloudActive()&&!root.querySelector('input:focus,textarea:focus')){ui.cloudChanged=false;refresh().catch(e=>console.warn('Refresh while returning to PackOps failed',e))}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&cloudActive()&&!hasPendingForm(root,ui.pickerOpen)){ui.cloudChanged=false;refresh(true).catch(e=>console.warn('Refresh while returning to PackOps failed',e))}});
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 (async()=>{
  // Read local configuration first, then connect Google/Supabase before rendering private views.

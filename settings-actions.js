@@ -17,11 +17,11 @@ export async function saveYearConfiguration(form,accounts){
  }
  return true;
 }
-export async function exportPackOpsBackup(form,getSetting,sharedSnapshot=null){
+export async function exportPackOpsBackup(form,getSetting,sharedSnapshot=null,cloudWorkflow=null){
  const pass=field(form,'passphrase'),destination=field(form,'destination');
  if(pass.length<12)throw Error('Use a passphrase at least 12 characters long');
  if(!window.confirm('Create an ENCRYPTED backup of the available PackOps records? In shared mode this contains the current authorized cloud snapshot plus locally queued files. Save only in a restricted location.'))return '';
- const backup=await createEncryptedBackup(pass,sharedSnapshot);
+ const backup=await createEncryptedBackup(pass,sharedSnapshot,cloudWorkflow);
  if(destination==='drive'){
   if(!getSetting('googleBackupFolder'))throw Error('Select a restricted Drive backup folder in Settings first');
   const result=await uploadEncryptedBackup(backup,getSetting('googleBackupFolder'),getSetting('googleClientId'));

@@ -9,5 +9,8 @@
     "build": "node tools/build.mjs",
     "serve": "node tools/serve.mjs",
     "build:production": "node tools/build.mjs --require-cloud"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.9"
   }
 }

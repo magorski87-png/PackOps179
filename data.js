@@ -2,7 +2,7 @@ export const LINKS={
   packDrive:'https://drive.google.com/drive/folders/1hNLn6KzWZFjm8HyQCo4pemaIym2qv5au',
   calendar:'https://drive.google.com/file/d/1uPTj-jJEHR64LKteZbUFz3gyinsis-Vj/view',
   calendarFolder:'https://drive.google.com/drive/folders/1zAXz3nJUUZFuJsdaSeWfZFM0RTtNHEP0',
-  ledger:'https://docs.google.com/spreadsheets/d/1tETtLSogYC3RFvHj_uDbAxgyGu9QcqXO/edit',
+  ledger:'https://docs.google.com/spreadsheets/d/1d9_8y2fWBwj4wOXIZcsWsFQXYRoGj3ShOJgPwWL3C00/edit',
   scoutCredits:'https://docs.google.com/spreadsheets/d/1ttivHLcq0bopzuKJrlUM1farkG287dM1Krts3Q-NZYQ/edit',
   receiptRoot:'https://drive.google.com/drive/folders/1fiuNxciwTNglne95DN7tVkil5SjHIXuF',
   receipts2026:'https://drive.google.com/drive/folders/1aBYw8oA0I3fv7dhOO_yVDikjFBx7Uhml',
