@@ -370,7 +370,7 @@ function families(){
  const denChoices=state.member?.role==='den_leader'?(state.member.den_scopes||[]):DEN_NAMES;
  return familyManagerView({forms:ui.familyForms,responses:ui.familyResults,activeId:ui.familyActive,
  roster:groupScouts(dbState.roster),preview:ui.familyPreview,sending:ui.familySending,lastLink:ui.familyLink,query:ui.familySearch,events:dbState.events,denChoices,cloudReady:cloudActive(),
- esc,btn,field,select,intro,note,money});
+ esc,btn,field,select,textarea,intro,note,money});
 }
 function familyPublicPage(){
  if(ui.familySent)return `${intro('Response received','Thank you!','Your RSVP or poll answer was saved securely.')}${note('You can reuse the private invitation link to update your response later.')}`;
@@ -494,7 +494,7 @@ async function handleAction(action,trigger){
     for(const recipient of preview.recipients.filter(r=>r.status==='pending')){
      // Mark attempted before awaiting: uncertain network outcomes are never resent automatically.
      recipient.status='sending';
-     try{const result=await inviteFamily(preview.formId,recipient.label,recipient.email,preview.sendEmail);
+     try{const result=await inviteFamily(preview.formId,recipient.label,recipient.email,preview.sendEmail,preview.note);
       recipient.url=result.url;recipient.status=result.emailed?'accepted by email provider':result.deliveryStatus==='email-failed'?'email failed — use private link':'private link created';
       if(result.errorMessage)recipient.error=result.errorMessage;
      }catch(e){recipient.status='not confirmed';recipient.error=e.message}
@@ -835,7 +835,7 @@ async function handleForm(form){
    const selected=ui.familyForms.find(r=>r.id===f('formId'));
    const recipients=kind==='family-invite'?[{label:f('recipientLabel'),email:f('recipientEmail')}]:
     familyRecipients(groupScouts(dbState.roster),selected?.den_scope||'').filter(r=>new FormData(form).getAll('recipient').includes(r.email));
-   ui.familyPreview=invitationPreview(selected,recipients,!!form.elements.sendEmail?.checked);
+   ui.familyPreview=invitationPreview(selected,recipients,!!form.elements.sendEmail?.checked,f('note'));
    render();return;
   }
   case 'family-public-response':{

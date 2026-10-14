@@ -103,9 +103,9 @@ export async function getFamilyResponses(formId){
  ]);
  fail(a,'Family invitations');fail(b,'Family replies');return {invitations:a.data||[],responses:b.data||[]};
 }
-export async function inviteFamily(formId,recipientLabel,recipientEmail='',sendEmail=false){
+export async function inviteFamily(formId,recipientLabel,recipientEmail='',sendEmail=false,note=''){
  requireMember();
- const {data,error}=await client.functions.invoke('family-rsvp',{body:{action:'invite',packId,formId,recipientLabel,recipientEmail,sendEmail}});
+ const {data,error}=await client.functions.invoke('family-rsvp',{body:{action:'invite',packId,formId,recipientLabel,recipientEmail,sendEmail,note}});
  fail({error},'Creating family invitation');if(data?.error)throw Error(data.error);return data;
 }
 export async function publicFamilyRequest(action,token,answer={}){

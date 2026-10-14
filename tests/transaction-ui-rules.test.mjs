@@ -19,7 +19,9 @@ test('ledger entry uses exactly one money column and stable posting identity',()
 test('family preview groups sibling contacts, displays each guardian and requires confirmation',()=>{
  const roster=[{name:'A Scout',den:'Webelos',guardianContacts:[{name:'Alice',email:'a@example.org'},{name:'Bob',email:'b@example.org'}]},{name:'B Scout',den:'Webelos',guardianContacts:[{name:'Alice',email:'a@example.org'}]},{name:'Other',den:'Wolf',email:'wolf@example.org'}];
  const recipients=familyRecipients(roster,'Webelos');assert.equal(recipients.length,2);assert.deepEqual(recipients.find(r=>r.email==='a@example.org').names,['A Scout','B Scout']);
- const preview=invitationPreview({id:'form',status:'open',title:'Camp RSVP'},recipients,true);assert.equal(preview.recipients.length,2);assert.match(preview.message,/Unique private link/);
+ const preview=invitationPreview({id:'form',status:'open',title:'Camp RSVP'},recipients,true,'Bring folding chairs');assert.equal(preview.recipients.length,2);assert.match(preview.message,/Unique private link/);
+ assert.equal(preview.note,'Bring folding chairs');assert.match(preview.message,/Note from your Pack leader:\nBring folding chairs/);
+ assert.throws(()=>invitationPreview({id:'form',status:'open',title:'Camp RSVP'},recipients,true,'x'.repeat(1001)),/under 1,000/);
  assert.throws(()=>invitationPreview({id:'form',status:'open',title:'Camp RSVP'},[{label:'Missing email',email:''}],true),/valid email/);
 });
 test('selected mobile document is materialized before the picker context disappears',async()=>{

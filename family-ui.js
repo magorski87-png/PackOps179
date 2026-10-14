@@ -16,7 +16,7 @@ export function familyResponseCsv(records){
 }
 export function familyPublicPanel(data,{field,select,esc}){
  if(!data)return '<div class="panel">Opening your private invitation…</div>';
- const header='<section class="panel stack"><span class="eyebrow">PACK 179 · FAMILY RESPONSE</span><h1>'+esc(data.title)+'</h1><p>'+esc(data.description||'')+'</p><p>Invited household: <strong>'+esc(data.recipientLabel)+'</strong></p>';
+ const header='<section class="panel stack"><span class="eyebrow">PACK 179 · FAMILY RESPONSE</span><h1>'+esc(data.title)+'</h1><p>'+esc(data.description||'')+'</p><p>Invited household: <strong>'+esc(data.recipientLabel)+'</strong></p>'+(data.personalNote?'<div class="note"><strong>Note from your Pack leader</strong><p style="white-space:pre-wrap">'+esc(data.personalNote)+'</p></div>':'');
  const footer='<p class="meta">Your response is private to authorized Pack leaders. You can reuse this link to update it.</p></section>';
  if(data.kind==='rsvp')return header+'<form class="stack" data-form="family-public-response">'+select('Will you attend?','status',[['yes','Yes'],['maybe','Maybe'],['no','No']],'yes')+'<div class="form-grid">'+field('Adults attending','adults','number','1','min="0" max="30" required')+field('Children attending','children','number','1','min="0" max="30" required')+'</div><button class="btn" type="submit">Submit my RSVP</button></form>'+footer;
  const options=Array.isArray(data.questions)?data.questions.flatMap(q=>Array.isArray(q.options)?q.options:[]):[];
