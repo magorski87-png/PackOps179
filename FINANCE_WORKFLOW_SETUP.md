@@ -1,6 +1,6 @@
 # PackOps transaction workflow: review before enabling
 
-This branch prepares a new Finance → Transactions & approvals screen. The currently published PackOps site and Courtney's ledger are unchanged until the reviewed branch and backend components are deliberately released. The Pack UUID is `bcf48631-8f33-4c66-b1ca-1573c769fd1b`.
+This branch prepares a new Finance → Transactions & approvals screen. The currently published PackOps site is unchanged. Courtney's ledger was converted to a native Google Sheet with a separate Excel backup; no financial transaction rows were edited. Automatic posting remains disabled until the reviewed branch and backend components are deliberately released. The Pack UUID is `bcf48631-8f33-4c66-b1ca-1573c769fd1b`.
 
 ## What leaders can do
 
@@ -14,6 +14,8 @@ This branch prepares a new Finance → Transactions & approvals screen. The curr
 The working native Google Sheet is `https://docs.google.com/spreadsheets/d/1d9_8y2fWBwj4wOXIZcsWsFQXYRoGj3ShOJgPwWL3C00/edit`, tab `Sheet1`. It was converted from the previous live Excel workbook on 2026-10-13 in the same Drive folder. All 90 populated cells through row 38 and all 16 formulas were compared with the original; no populated values differed. A blank G1 `PackOps ID` header was added. The original file ID `1tETtLSogYC3RFvHj_uDbAxgyGu9QcqXO` is labeled archived, and an untouched separate Excel backup is at `https://docs.google.com/spreadsheets/d/1IjiiZFppYF9kQQNH6eF01L9ipEUANG5M/edit`. Preserve both. Ask Courtney to edit the native Sheet going forward and confirm access under her account before enabling automatic posting. The new Sheet is currently owned by Mike's account; the Pack account has writer access. Account ownership and access to the Apps Script must be reviewed before posting is enabled.
 
 The verified layout is A `Item`, B `Date`, C `cost deleted`, D `deposit added`, E `Account Balance Remaining`, F `Receipt image uploaded`, G `PackOps ID`. The bridge checks A:G on every request. The original's later cash rows have no E balance formula, so an appended row calculates its balance from the most recent numeric E balance plus all subsequent C/D movements. It does not rewrite historical rows. Reconcile those balances with Courtney, and test a fictional row in a separate test Sheet plus a duplicate retry before connecting the working tab. Configure exact targets per year; never infer the worksheet from an app URL.
+
+Snapshot reconciliation likewise carries C/D movements across blank E cells to the next populated balance. A discrepancy still blocks refresh. As of the conversion, row 18 is the latest numeric E balance and the following rows contain date-only placeholders and three deposits through row 38; this is a calculation baseline, not an assertion that the bank has reconciled those entries.
 
 ## Apply after branch review
 

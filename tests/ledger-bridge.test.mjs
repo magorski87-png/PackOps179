@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createHmac} from 'node:crypto';
 import vm from 'node:vm';
+import {parseLedgerCsv,ledgerImportReview} from '../finance.js';
 
 const source=readFileSync(new URL('../integrations/ledger-bridge.gs',import.meta.url),'utf8');
 const secret='a'.repeat(40),packId='bcf48631-8f33-4c66-b1ca-1573c769fd1b';
@@ -54,6 +55,11 @@ test('posts to the verified A:G layout and bridges missing historical balances',
  const again=call('post',transaction);
  assert.equal(again.ok,true);assert.equal(again.alreadyPosted,true);assert.equal(cells.length,5);
  assert.match(call('post',{...transaction,description:'Changed'}).error,/edited/);
+ const snapshot=call('snapshot');
+ const csv=snapshot.values.map(row=>row.map(value=>'"'+String(value??'').replaceAll('"','""')+'"').join(',')).join('\n');
+ const parsed=parseLedgerCsv(csv);
+ assert.equal(parsed.at(-1).id,'packops:'+id);
+ assert.deepEqual(ledgerImportReview(parsed).balanceWarnings,[]);
 });
 
 test('refuses a changed header and a nonnumeric intervening money cell',()=>{

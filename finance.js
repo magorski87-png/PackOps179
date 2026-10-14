@@ -132,14 +132,17 @@ export function ledgerImportReview(rows){
  const withBalances=rows.filter(r=>r.balance!==null);
  const last=withBalances.at(-1);
  const balanceWarnings=[];
- let prior=null;
+ let prior=null,pendingMovement=0;
  for(const row of rows){
-  if(row.balance===null)continue;
+  if(row.balance===null){
+   if(prior!==null)pendingMovement=round(pendingMovement+(Number(row.credit)||0)-(Number(row.debit)||0));
+   continue;
+  }
   if(prior!==null&&!row.isOpening){
-   const implied=round(prior+(Number(row.credit)||0)-(Number(row.debit)||0));
+   const implied=round(prior+pendingMovement+(Number(row.credit)||0)-(Number(row.debit)||0));
    if(Math.abs(implied-row.balance)>0.02)balanceWarnings.push(row.sourceRow);
   }
-  prior=row.balance;
+  prior=row.balance;pendingMovement=0;
  }
  return {rows:rows.length,opening:withBalances.find(x=>x.isOpening)?.balance??null,
   lastBalance:last?.balance??null,lastBalanceDate:last?.date||'',lastBalanceItem:last?.description||'',

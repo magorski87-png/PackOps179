@@ -1,6 +1,6 @@
 # PackOps 179 — Finance and leader workflow update (review branch)
 
-This branch adds editable budget allocations, filtered Scout-account proposals, individual-family invitation preview, direct event-lead editing, and more reliable phone attachments. Finance now has a protected transaction screen with submit, reviewer approval, payment verification, audit history and an optional verified ledger bridge. The entry fields match Courtney's live working ledger. Its current Drive storage format is `.xlsx` even though Courtney edits it in Google Sheets. Automatic posting requires her to approve a Google Sheets format ledger as the authoritative file; the existing working file is never changed or replaced silently. See [Finance workflow setup](FINANCE_WORKFLOW_SETUP.md) for the release checks and needed information. The published website remains on its current version until this branch is deliberately merged.
+This branch adds editable budget allocations, filtered Scout-account proposals, individual-family invitation preview, direct event-lead editing, and more reliable phone attachments. Finance now has a protected transaction screen with submit, reviewer approval, payment verification, audit history and an optional verified ledger bridge. The entry fields match Courtney's native Google Sheet. Its original Excel file is archived and a separate untouched backup is retained. Automatic posting still requires the private backend and bridge setup and a reviewed test transaction. See [Finance workflow setup](FINANCE_WORKFLOW_SETUP.md) for the release checks. The published website remains on its current version until this branch is deliberately merged.
 
 `npm ci`, `npm test` and `npm run build:production` validate this code. Backend migration 008 and the Edge Functions must be installed before the secure transaction screen can accept entries. No privileged key is bundled with GitHub Pages.
 
@@ -66,7 +66,7 @@ A mobile-first, installable leadership PWA for Pack 179. Public app code; **Pack
 - The original ten-button PackOps dashboard, events and checklists, volunteers, printable meeting cue sheet, roster importer, equipment, library, and calendar connection.
 - **Pack Finance** with six connected screens: Overview, Budget Builder, Scout Accounts, Reimbursements, Ledger Review, and Reports & Forecasting.
 - **Budget Builder:** Annual income/expense allocations, optional PackOps event assignment, a locally recorded planning baseline. Includes one-click **seed from your uploaded 2026–27 Budget Planner** with $7,116 in proposed expenses, $4,305 planned dues, and a separately identified $3,000 popcorn proceeds goal. The $2,500 beginning-balance assumption is NOT recorded as income. Older local planning lines are preserved when upgrading.
-- **Official ledger snapshots:** CSV import (not editing Courtney's Excel workbook); classification as expense, income, transfer, or restricted allocation; optional category and PackOps event tags. Transfers are never automatically counted as spending.
+- **Official ledger snapshots:** CSV import from Courtney's Google Sheet; classification as expense, income, transfer, or restricted allocation; optional category and PackOps event tags. Transfers are never automatically counted as spending.
 - **Scout accounts:** Either import the 2026–27 individual-credits sheet as CSV or explicitly authorize the app to read the Pack's existing Google Sheet via `spreadsheets.readonly`. Sort and filter by den, search, review mismatches, and export restricted views. The Google Sheets request deliberately excludes guardian contacts.
 - **Scout account adjustments:** Proposed credit/charge corrections with reason and export for treasurer review. They **do not change** the official sheet or the imported official balances.
 - **Reimbursements:** Submit a local request tied to a PackOps/Google Calendar event title, optionally attach an existing locally queued receipt; mark locally reviewed or declined; mark paid only after matching an imported categorized ledger expense of the same amount. **No payments are initiated.**
@@ -91,7 +91,7 @@ This version **does not have centrally enforced app authentication, backend role
 
 ### What isn't fully connected yet
 
-- No automatic read of the `.xlsx` treasurer ledger. Open it in Drive and export the current sheet to CSV to import. The source workbook remains untouched.
+- The published site still uses manual CSV import. Automatic Sheet refresh and reviewed posting are prepared on the draft branch and require backend setup before release.
 - No automatic two-way sync of budgets, reimbursements, adjustments, or notes between phones/computers.
 - No centrally verified committee approval or treasurer role enforcement. "Reviewed" and "paid" are local tracking indicators that need verification.
 - No real OCR engine yet; receipt itemization is entered manually. A secured, consented OCR service can be added later, with human reconciliation required.
@@ -137,7 +137,7 @@ A Google Cloud consent screen may require configuration/verification for third-p
 ## Finance review workflow
 
 1. **Plan:** Add expense/income allocations in Budget Builder; do not copy old sample actuals as authoritative.
-2. **Ledger:** Download the active `.xlsx` treasurer worksheet as CSV and import a read-only snapshot under Ledger Review.
+2. **Ledger:** Download the active Google Sheet as CSV and import a read-only snapshot under Ledger Review.
 3. **Classify:** Label transactions as expense/income/transfer/restricted; assign category and linked PackOps event. No source workbook writes.
 4. **Accounts:** Refresh Scout credits using authorized Google Sheets read-only access; review discrepancies rather than auto-correcting.
 5. **Receipts:** Capture receipt, enter line items, and upload to the chosen Pack Drive folder when authorized.
