@@ -1,13 +1,13 @@
 # PackOps 179 v0.6 — Secure shared workspace setup
 
-The GitHub Pages frontend is deployable without access to secrets. Shared Pack records remain **disabled until you finish this setup**. Existing v0.5 records are left in their original local IndexedDB and are NOT automatically uploaded.
+The GitHub Pages frontend is deployable without access to secrets. Its public project URL, publishable key and Pack UUID are already configured in `cloud-config.js`. As checked October 14, 2026 (Eastern), migrations 008/009 and the three Edge Functions are deployed on the existing project. Email delivery, the Sheet bridge and tests with distinct Pack roles are still pending. Existing local records are not automatically uploaded.
 
 ## 1. Create a Pack-controlled Supabase project
 
 - Create a Supabase project in an appropriate **US hosting region**, owned by a Pack-controlled administrative account with a second trusted Pack administrator.
-- Use the **SQL Editor** to run, IN FILENAME ORDER, every SQL file under `supabase/migrations/` (001 through 008). Migration 008 adds the reviewed Finance transaction workflow described in [FINANCE_WORKFLOW_SETUP.md](FINANCE_WORKFLOW_SETUP.md).
+- On a brand new project, use the **SQL Editor** to run every SQL file under `supabase/migrations/` in filename order (001 through 009). On the existing Pack project, inspect migration history and apply **only missing migrations** in order; do not rerun old data migrations against live records. Migration 008 adds the Finance transaction workflow; migration 009 adds optional private invitation notes. Back up the existing database before applying either.
 - Note the project's URL and its **publishable key** from Supabase Project Settings. These identifiers are intended for a browser with RLS enabled. **Never** paste or commit a `service_role` key, `sb_secret_` key, Google OAuth client secret, or Resend API key.
-- In the SQL Editor create the Pack itself (this is an example, not executed automatically):
+- On a brand new project, create the Pack itself in the SQL Editor (this is an example, not executed automatically). On the existing project, inspect `select id,name from public.packs;` and preserve the configured Pack UUID `bcf48631-8f33-4c66-b1ca-1573c769fd1b` and its data:
 
 ```sql
 insert into public.packs(name) values ('Pack 179') returning id;
@@ -42,7 +42,7 @@ values (
 
 ## 3. Configure all phones and family invitation links
 
-After RLS and roles have been verified, update the PUBLIC identifiers in `cloud-config.js` in the GitHub repository:
+The current PUBLIC identifiers are already in `cloud-config.js`. If switching projects after RLS and roles have been verified, update them there:
 
 ```js
 export const PACK_CLOUD_CONFIG={
@@ -52,7 +52,7 @@ export const PACK_CLOUD_CONFIG={
 };
 ```
 
-Run `npm test` and `npm run build:production`, then obtain production deployment approval before merging this file. The public key is NOT a secret; it is safe in a browser **only if the migration's table privileges and Row Level Security have been applied**. Never use a privileged Supabase key here. After this commit, authorized leaders on new devices and parents with private `#family/<token>` links can reach the same backend without manually entering connection information.
+Run `npm.cmd test` and `npm.cmd run build:production` on Windows PowerShell (or `npm` elsewhere), then review the release before merging. The public key is NOT a secret; it is safe in a browser **only if the migration's table privileges and Row Level Security have been applied**. Never use a privileged Supabase key here. Once the backend is deployed, authorized leaders on new devices can sign in without manually entering connection information.
 
 ## 4. Deploy the family RSVP/email Edge Function
 
@@ -74,7 +74,7 @@ Set Edge Function secrets in Supabase → Edge Function Secrets:
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are server-side Supabase-provided variables and must never be copied into browser code. Sending RSVP emails through Resend requires its own account, verified domain, and secure API key.
 
-Without email secrets, leaders can still generate **private family invitation links** and share them manually.
+Without email secrets, leaders can still generate **private family invitation links** and share them manually. Apply migration 009 before deploying the function version that saves an optional note. Selected families receive one link each, and the note is visible on their private response page; email requires the configured sending provider.
 
 **Current RSVP support:** Yes/Maybe/No and adults/children; one-choice polls; volunteer-position choices; responses can be edited from the same invitation link. The system supports result search, totals, and CSV export. Capacity enforcement, waitlists, bulk campaign management, SMS, and web push are not in this release.
 
@@ -127,4 +127,4 @@ These tests MUST be done with a real project; passing the repository's Node test
 - Individual volunteer capacity enforcement, multi-question surveys, live Scoutbook advancement writes, SMS, push notifications, and automatic archival/retention jobs require later work. Automatic ledger refresh and posting require the separate native Sheet bridge configuration in the Finance setup guide.
 - Cloud youth records are not stored in public assets; however previously imported v0.5 local copies still reside in that browser until expressly cleared. Use a trusted device and established retention policy.
 
-The v0.6 frontend can be deployed immediately; **the real cloud service is not live until Supabase is provisioned and the SQL migrations, Google provider, key configuration, and Edge Function are deployed and verified**.
+Run `npm.cmd run check:live` for a read-only check of the Finance table and three required functions; this now passes on the configured project. An endpoint being present does **not** prove authorization, email, or Sheet posting works. Complete the live RLS and transaction checks above before telling leaders the workflows are available. The Sheet bridge and email sender still need their protected configuration.

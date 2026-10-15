@@ -49,6 +49,9 @@ create table if not exists public.finance_notifications (
 create or replace function public.pack_is_finance_reviewer(p_pack uuid)
 returns boolean language sql stable security definer set search_path=''
 as $$select coalesce(public.pack_role(p_pack) in ('admin','cubmaster','treasurer'),false)$$;
+-- The helper is used by signed-in RLS policies; it need not be callable anonymously.
+revoke all on function public.pack_is_finance_reviewer(uuid) from public,anon;
+grant execute on function public.pack_is_finance_reviewer(uuid) to authenticated;
 alter table public.finance_requests enable row level security;
 alter table public.finance_request_audit enable row level security;
 alter table public.finance_notifications enable row level security;

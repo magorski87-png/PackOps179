@@ -57,11 +57,13 @@ Deno.serve(async(req:Request)=>{
    if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return invalid('Valid email required');
    if(body.sendEmail&&!email)return invalid('Recipient email required for sending');
    if(body.sendEmail&&(!from||!resendKey))return invalid('Email provider is not configured; create a link and share it manually instead',503);
+   const note=String(body.note||'').trim();
+   if(note.length>1000)return invalid('Keep the family note under 1,000 characters');
    const token=Array.from(crypto.getRandomValues(new Uint8Array(32)),v=>v.toString(16).padStart(2,'0')).join('');
    const deadline=new Date(Date.now()+30*86400000);
    if(form.closes_at&&new Date(form.closes_at)<deadline)deadline.setTime(new Date(form.closes_at).getTime());
    const data={pack_id:packId,form_id:formId,recipient_label:label,recipient_email:email||null,
-    token_hash:await hashToken(token),expires_at:deadline.toISOString(),created_by:account.user.id};
+    token_hash:await hashToken(token),expires_at:deadline.toISOString(),created_by:account.user.id,personal_note:note};
    const created=await db.from('family_invitations').insert(data).select('id').single();
    if(created.error)throw created.error;
    const url=publicSite+sitePath+'#family/'+token;
@@ -69,7 +71,7 @@ Deno.serve(async(req:Request)=>{
    if(body.sendEmail){
     try{const sent=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:'Bearer '+resendKey,'Content-Type':'application/json','Idempotency-Key':'family-'+created.data.id},body:JSON.stringify({
      from,to:[email],subject:'Pack 179: '+form.title,
-     text:'Pack 179 invites your family to respond to '+form.title+'.\n\nOpen your private response link:\n'+url+'\n\nThis link is intended for your household only.\n'
+     text:'Pack 179 invites your family to respond to '+form.title+'.\n\n'+(note?'Note from your Pack leader:\n'+note+'\n\n':'')+'Open your private response link:\n'+url+'\n\nThis link is intended for your household only.\n'
     })});
     emailed=sent.ok;
     if(!emailed)emailError='The email provider rejected delivery. Check sender verification and delivery logs; the private link is available below.';
@@ -81,13 +83,13 @@ Deno.serve(async(req:Request)=>{
   const token=String(body.token||'');
   if(!HEX.test(token))return invalid('Invalid invitation link',401);
   const hash=await hashToken(token);
-  const found=await db.from('family_invitations').select('id,pack_id,form_id,recipient_label,expires_at,last_submitted_at').eq('token_hash',hash).maybeSingle();
+  const found=await db.from('family_invitations').select('id,pack_id,form_id,recipient_label,personal_note,expires_at,last_submitted_at').eq('token_hash',hash).maybeSingle();
   const inv=found.data;
   if(found.error||!inv||Date.parse(inv.expires_at)<Date.now())return invalid('This invitation is invalid or expired',410);
   const formResult=await db.from('family_forms').select('id,title,description,kind,questions,status,closes_at').eq('id',inv.form_id).eq('pack_id',inv.pack_id).maybeSingle();
   const form=formResult.data;
   if(!form||form.status!=='open'||(form.closes_at&&Date.parse(form.closes_at)<Date.now()))return invalid('This RSVP or poll has closed',410);
-  if(action==='get')return respond({title:form.title,description:form.description,kind:form.kind,questions:form.questions,recipientLabel:inv.recipient_label,expiresAt:inv.expires_at});
+  if(action==='get')return respond({title:form.title,description:form.description,kind:form.kind,questions:form.questions,recipientLabel:inv.recipient_label,personalNote:inv.personal_note||'',expiresAt:inv.expires_at});
   if(action!=='respond')return invalid('Unknown action');
   const answer=body.answer||{};
   if(!validAnswer(answer,form.kind,form.questions))return invalid('Complete the requested RSVP or poll fields');
