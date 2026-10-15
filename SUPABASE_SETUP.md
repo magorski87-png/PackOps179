@@ -1,6 +1,6 @@
 # PackOps 179 v0.6 — Secure shared workspace setup
 
-The GitHub Pages frontend is deployable without access to secrets. Its public project URL, publishable key and Pack UUID are already configured in `cloud-config.js`; this alone does not deploy database migrations or Edge Functions. Existing local records are not automatically uploaded.
+The GitHub Pages frontend is deployable without access to secrets. Its public project URL, publishable key and Pack UUID are already configured in `cloud-config.js`. As checked October 14, 2026 (Eastern), migrations 008/009 and the three Edge Functions are deployed on the existing project. Email delivery, the Sheet bridge and tests with distinct Pack roles are still pending. Existing local records are not automatically uploaded.
 
 ## 1. Create a Pack-controlled Supabase project
 
@@ -127,4 +127,4 @@ These tests MUST be done with a real project; passing the repository's Node test
 - Individual volunteer capacity enforcement, multi-question surveys, live Scoutbook advancement writes, SMS, push notifications, and automatic archival/retention jobs require later work. Automatic ledger refresh and posting require the separate native Sheet bridge configuration in the Finance setup guide.
 - Cloud youth records are not stored in public assets; however previously imported v0.5 local copies still reside in that browser until expressly cleared. Use a trusted device and established retention policy.
 
-Run `npm.cmd run check:live` for a read-only check of the Finance table and three required functions. An endpoint being present does **not** prove authorization, email, or Sheet posting works. Complete the live RLS and transaction checks above before telling leaders the workflows are available. The website may be deployed while these services are missing, but submissions will fail until setup is complete.
+Run `npm.cmd run check:live` for a read-only check of the Finance table and three required functions; this now passes on the configured project. An endpoint being present does **not** prove authorization, email, or Sheet posting works. Complete the live RLS and transaction checks above before telling leaders the workflows are available. The Sheet bridge and email sender still need their protected configuration.
