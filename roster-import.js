@@ -2,6 +2,14 @@ import {csvParse,makeId} from './data.js';
 const normalize=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const col=(headers,...names)=>{for(const key of names){const exact=headers.findIndex(h=>h===key);if(exact>=0)return exact;}for(const key of names){const fuzzy=headers.findIndex(h=>h.includes(key));if(fuzzy>=0)return fuzzy;}return -1};
 export const RANKS=['Lion','Tiger','Wolf','Bear','Webelos','Arrow of Light'];
+// Scoutbook appends den numbers (for example, "Webelos 2"). Keep an ambiguous
+// number-only label intact; its rank is not a reliable way to infer a den.
+export function cleanDenName(raw){
+ const den=String(raw||'').trim();
+ const match=den.match(/^(Lion|Tiger|Wolf|Bear|Webelos|Arrow of Light|AOL)\s+\d+$/i);
+ if(!match)return den;
+ return /^aol$/i.test(match[1])?'Arrow of Light':RANKS.find(rank=>rank.toLowerCase()===match[1].toLowerCase())||den;
+}
 export function denGroup(raw){
  const den=normalize(raw);
  if(!den)return 'Unassigned';
@@ -28,19 +36,19 @@ export function parseRoster(text){
   if(!value('guardian'))issues.push('Guardian information missing');
   if(!value('email')&&!value('mobile')&&!value('home'))issues.push('No contact method');
   if(value('email')&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value('email')))issues.push('Email appears invalid');
-  const rawDen=value('den'),rank=value('rank'),group=denGroup(rawDen);
+  const rawDen=value('den'),rank=value('rank'),den=cleanDenName(rawDen),group=denGroup(den);
   if(!rawDen)issues.push('Den missing');
   if(group==='Needs review')issues.push('Den label is ambiguous — verify against Scoutbook');
   if(group!=='Needs review'&&group!=='Unassigned'&&RANKS.includes(rank)&&rank!==group)issues.push('Rank and den disagree — verify, do not auto-correct');
   const nameKey=normalize(first+' '+last);
   if(memberId&&seenIds.has(memberId)||seenNames.has(nameKey))issues.push('Possible duplicate Scout — review before importing');
   if(memberId)seenIds.add(memberId);seenNames.add(nameKey);
-  const rec={id:makeId(),first,last,name:`${first} ${last}`.trim(),guardian:value('guardian'),relationship:value('relation'),email:value('email'),phone:value('mobile')||value('home'),den:rawDen,denGroup:group,rank,memberId,sourceRow:i+1,issues};
+  const rec={id:makeId(),first,last,name:`${first} ${last}`.trim(),guardian:value('guardian'),relationship:value('relation'),email:value('email'),phone:value('mobile')||value('home'),den,denGroup:group,rank,memberId,sourceRow:i+1,issues};
   result.push(rec);if(issues.length)warnings.push({row:i+1,issues});
  }
  return {records:result,warnings,ignored,headerRow:headerAt+1,columns:heads.length,totalDataRows:rows.length-headerAt-1};
 }
-export function importPrivacySummary(parsed){return `${parsed.records.length} potential Scouts; ${parsed.warnings.length} rows need review; ${parsed.ignored} empty/section rows skipped. Original values preserved; no automatic merges or reassignment.`}
+export function importPrivacySummary(parsed){return `${parsed.records.length} potential Scouts; ${parsed.warnings.length} rows need review; ${parsed.ignored} empty/section rows skipped. Numbered den suffixes removed; ambiguous den labels still need review. No automatic merges or reassignment.`}
 // Present repeated membership IDs as one Scout while retaining all raw source rows.
 // Never combine records whose names disagree or whose IDs are missing.
 export function groupScouts(records){
@@ -65,7 +73,7 @@ export const safeCsvValue=value=>{
  return '"'+v.replaceAll('"','""')+'"';
 };
 export function exportRoster(records,fields=['name','den']){
- const allowed={name:'Scout name',den:'Original den',denGroup:'Den group',rank:'Rank',guardian:'Guardian',email:'Guardian email',phone:'Guardian phone',issues:'Review notes'};
+ const allowed={name:'Scout name',den:'Den',denGroup:'Den group',rank:'Rank',guardian:'Guardian',email:'Guardian email',phone:'Guardian phone',issues:'Review notes'};
  const chosen=fields.filter(k=>allowed[k]);
  if(!chosen.length)throw Error('Select at least one export field');
  const read=(r,key)=>{
