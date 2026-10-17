@@ -33,20 +33,37 @@ export function familyManagerView({roster=[],preview=null,sending=false,forms=[]
  </section>`:''}
  `}`;
 }
-export function denWorkspaceView({state,den='',allowed=[],esc,btn,field,select,textarea,intro,note}){
- const plans=state.denPlans.filter(x=>x.den===den).sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'));
+export function denWorkspaceView({state,den='',allowed=[],catalog=[],planId='',preview=null,esc,btn,field,select,textarea,intro,note}){
+ const plans=state.denPlans.filter(x=>x.den===den).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
  const roster=state.roster.filter(x=>(x.denGroup||x.den)===den);
  const progress=state.adventureProgress.filter(x=>x.den===den);
- const attendees=state.attendance.filter(x=>x.den===den);
- return `${intro('Plan a great den meeting','Den Leader Workspace','Den meetings, preparation and internal adventure progress—all in one place, without pretending to post to Scoutbook Plus.')}
- <section class="panel stack"><div class="row-between"><h2>My den</h2><span class="pill">${roster.length} roster entries · ${plans.length} meeting plans</span></div>
+ const plan=plans.find(x=>x.id===planId);
+ const names=ids=>(ids||[]).map(id=>roster.find(r=>r.id===id)?.name).filter(Boolean);
+ const adventures=catalog.filter(x=>x.den===den);
+ return `${intro('Plan a great den meeting','Den Leader Workspace','Prepare meetings, record attendance and internal adventure progress. Official advancement remains in Scoutbook Plus.')}
+ <section class="panel stack"><div class="row-between"><h2>My den</h2><span class="pill">${roster.length} Scouts · ${plans.length} saved meetings</span></div>
  ${select('Den','den-choice',allowed.map(x=>[x,x]),den,'data-change="den-choice"')}
- <div class="finance-metrics"><div class="finance-kpi"><small>Meetings recorded</small><strong>${plans.length}</strong></div><div class="finance-kpi"><small>Adventure progress items</small><strong>${progress.length}</strong></div><div class="finance-kpi"><small>Attendance checkoffs</small><strong>${attendees.length}</strong></div></div></section>
- ${den?`<div class="split"><section class="panel stack"><h2>Meeting preparation</h2><form data-form="den-plan" class="stack"><div class="form-grid">${field('Meeting or adventure title','title','text','','required')}${field('Date','date','date','','required')}</div>${textarea('Meeting activities / simple run of show','agenda','')}${textarea('Equipment & materials needed','supplies','')}<button class="btn" type="submit">Save den meeting plan</button></form>
- ${plans.map(x=>`<div class="list-item"><strong>${esc(x.title)}</strong><p class="meta">${esc(x.date)}</p><p>${esc(x.agenda||'')}</p><p class="meta">Supplies: ${esc(x.supplies||'Not specified')}</p></div>`).join('')}
- </section><section class="panel stack"><h2>Internal adventure checklist</h2><p>Choose an adventure title and a Scout to record working progress. This is not an official Scoutbook advancement entry.</p>
- <form data-form="den-progress" class="stack">${field('Cub Scout adventure','adventure','text','','required maxlength="140"')}${select('Scout','scoutId',roster.map(x=>[x.id,(x.name||((x.firstName||'')+' '+(x.lastName||'')))||x.id]))}${select('Status','status',[['planned','Planned'],['started','Started'],['ready','Ready for Scoutbook review']])}<button class="btn" type="submit">Record progress</button></form>
- ${progress.map(p=>`<div class="list-item"><strong>${esc(p.adventure)}</strong><div class="meta">${esc(roster.find(x=>x.id===p.scoutId)?.name||'Scout')} · ${esc(p.status)}</div></div>`).join('')}
+ <div class="row wrap">${btn('New meeting','den-new-plan','btn btn-outline')}${plans.map(x=>btn(x.title+' · '+x.date,'den-open-plan',planId===x.id?'btn':'btn btn-outline btn-small',`data-id="${esc(x.id)}"`)).join('')}</div></section>
+ ${den?`<div class="split"><section class="panel stack"><h2>${plan?'Saved meeting details':'Plan a meeting'}</h2>
+ <form data-form="den-plan" data-id="${esc(plan?.id||'')}" class="stack">
+ <div class="form-grid">${field('Meeting or adventure title','title','text',plan?.title||'','required maxlength="140"')}${field('Date','date','date',plan?.date||'','required')}${field('Location','location','text',plan?.location||'','maxlength="240"')}</div>
+ ${textarea('Activities / run of show','agenda',plan?.agenda||'')}${textarea('Equipment & materials','supplies',plan?.supplies||'')}
+ <h3>Who attended?</h3><p>Check Scouts who attended; you can return and correct this later.</p>
+ <div class="recipient-list">${roster.map(r=>`<label class="recipient-choice"><input type="checkbox" name="attendee" value="${esc(r.id)}" ${plan?.attendeeIds?.includes(r.id)?'checked':''}><span>${esc(r.name||r.id)}</span></label>`).join('')||'<p>No Scouts available in this den roster.</p>'}</div>
+ <div class="row wrap"><button class="btn" type="submit">${plan?'Update meeting':'Save meeting'}</button>${btn('Discard unfinished edits','discard-den-draft','btn btn-ghost')}</div><p class="meta">Unfinished edits are saved in this browser session.</p></form>
+ ${plan?`<div class="note"><strong>Saved meeting:</strong> ${esc(plan.title)} · ${esc(plan.date)} · ${esc(plan.location||'No location')}<br>Attended: ${esc(names(plan.attendeeIds).join(', ')||'Not recorded')}<br>Adventure records: ${progress.filter(x=>x.planId===plan.id).length}</div>`:''}
+ </section><section class="panel stack"><h2>Adventures</h2><p>Select an adventure, then check every Scout who worked on it. Progress stays in PackOps until entered in Scoutbook Plus.</p>
+ <form data-form="den-progress" class="stack">${select('Saved meeting (optional)','planId',[['','No linked meeting'],...plans.map(x=>[x.id,x.title+' · '+x.date])],plan?.id||'')}
+ <div class="field"><label for="adventure-name">Adventure</label><input class="input" id="adventure-name" name="adventure" list="adventure-names" required maxlength="140"><datalist id="adventure-names">${adventures.map(a=>`<option value="${esc(a.title)}"></option>`).join('')}</datalist></div>
+ ${select('Status','status',[['planned','Planned'],['started','Started'],['ready','Ready for Scoutbook review']])}
+ <div class="recipient-list">${roster.map(r=>`<label class="recipient-choice"><input type="checkbox" name="scoutId" value="${esc(r.id)}"><span>${esc(r.name||r.id)}</span></label>`).join('')}</div>
+ <button class="btn" type="submit">Record for selected Scouts</button></form>
+ ${progress.map(p=>`<div class="list-item"><strong>${esc(p.adventure)}</strong><div class="meta">${esc(roster.find(x=>x.id===p.scoutId)?.name||'Scout')} · ${esc(p.status)}${p.planId?' · '+esc(plans.find(x=>x.id===p.planId)?.title||'Meeting'):''}</div></div>`).join('')}
+ <div class="divider"></div><h3>Adventure catalog</h3><p>Import a CSV using the sample format. Review rows before saving. <a href="https://www.scouting.org/programs/cub-scouts/adventures/" target="_blank" rel="noopener noreferrer">Check the official adventure directory ↗</a></p>
+ <a class="btn btn-outline btn-small" href="./adventure-example.csv" download="PackOps-adventure-example.csv">Download example CSV</a>
+ <form data-form="adventure-csv" class="stack"><input class="input" type="file" name="file" accept=".csv,text/csv" required><button class="btn btn-outline" type="submit">Preview adventure CSV</button></form>
+ ${preview?`<div class="note"><strong>${preview.items.length} valid rows</strong> · ${preview.errors.length} issues${preview.errors.length?'<br>'+preview.errors.map(esc).join('<br>'):''}</div>${!preview.errors.length?btn('Import reviewed adventures','adventure-import','btn'):''}`:''}
+ <p class="meta">${adventures.length} catalog entries for this den. PackOps does not automatically sync or certify the official catalog.</p>
  </section></div>`:note('Assign a den to your approved leader account in Settings before planning.',true)}
  `;
 }
