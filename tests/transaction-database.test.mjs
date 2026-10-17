@@ -38,6 +38,18 @@ test('Postgres enforces transaction roles, lifecycle, audit and duplicate preven
   assert.equal((await db.query('select display_name from public.pack_role_names')).rows[0].display_name,'Example');
   await as('outsider');assert.equal((await db.query('select * from public.leader_contacts')).rows.length,0);
   assert.equal((await db.query('select * from public.pack_role_names')).rows.length,0);
+  const addCard=(linked=null)=>db.query('insert into public.leader_contact_cards(pack_id,user_id,name,email) values($1,$2,$3,$4)',[pack,linked,'Committee Chair','chair@example.test']);
+  await assert.rejects(addCard(),/row-level security/);
+  await as('admin');await addCard();
+  await db.query('insert into public.adventure_catalog(pack_id,den,title) values($1,$2,$3)',[pack,'Lion','Lion Adventure']);
+  await as('den_leader');assert.equal((await db.query('select * from public.leader_contact_cards')).rows.length,1);
+  assert.equal((await db.query('select * from public.adventure_catalog')).rows.length,0);
+  assert.equal((await db.query("update public.leader_contact_cards set name='Impersonated' where name='Committee Chair' returning id")).rows.length,0);
+  await db.query('insert into public.adventure_catalog(pack_id,den,title) values($1,$2,$3)',[pack,'Webelos','Bobcat']);
+  await assert.rejects(()=>db.query('insert into public.adventure_catalog(pack_id,den,title) values($1,$2,$3)',[pack,'Lion','Other']),/row-level security/);
+  await db.query('insert into public.pack_ui_preferences(pack_id,user_id,payload) values($1,$2,$3)',[pack,ids.den_leader,{hiddenCards:['equipment']}]);
+  await assert.rejects(()=>db.query('insert into public.pack_ui_preferences(pack_id,user_id,payload) values($1,$2,$3)',[pack,ids.treasurer,{}]),/row-level security/);
+  await as('outsider');assert.equal((await db.query('select * from public.pack_ui_preferences')).rows.length,0);
   await as('outsider');await assert.rejects(submit,/membership/);
   await as('den_leader');await submit();await submit();
   assert.equal((await db.query('select count(*)::int n from public.finance_requests')).rows[0].n,1);

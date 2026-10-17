@@ -77,10 +77,28 @@ export async function migrateLocalRecords(localData){
 }
 export async function listMembers(){requireMember();const res=await client.from('pack_members').select('user_id,role,den_scopes,status,created_at').eq('pack_id',packId);fail(res,'Leader access');return res.data||[]}
 export async function fetchLeaderContacts(){
- requireMember();const res=await client.from('leader_contacts').select('user_id,name,den,phone,email').eq('pack_id',packId).order('name');fail(res,'Leader contacts');return res.data||[];
+ requireMember();const res=await client.from('leader_contact_cards').select('id,user_id,name,den,roles,phone,email').eq('pack_id',packId).order('name');fail(res,'Leader contacts');return res.data||[];
 }
 export async function saveLeaderContact(details){
- requireMember();const res=await client.from('leader_contacts').upsert({pack_id:packId,user_id:user.id,...details},{onConflict:'pack_id,user_id'});fail(res,'Saving your contact');
+ requireMember();const existing=await client.from('leader_contact_cards').select('id').eq('pack_id',packId).eq('user_id',user.id).maybeSingle();fail(existing,'Finding your contact');
+ const query=existing.data?client.from('leader_contact_cards').update(details).eq('pack_id',packId).eq('id',existing.data.id):client.from('leader_contact_cards').insert({pack_id:packId,user_id:user.id,...details});fail(await query,'Saving your contact');
+}
+export async function saveAdminContact(details,id=''){
+ requireMember();if(!['admin','cubmaster'].includes(member.role))throw Error('Only Pack administrators can manage other contact cards');
+ const query=id?client.from('leader_contact_cards').update(details).eq('pack_id',packId).eq('id',id):client.from('leader_contact_cards').insert({pack_id:packId,...details});fail(await query,'Saving leader card');
+}
+export async function fetchUiPreferences(){
+ requireMember();const res=await client.from('pack_ui_preferences').select('payload').eq('pack_id',packId).eq('user_id',user.id).maybeSingle();fail(res,'Dashboard preferences');return res.data?.payload||{};
+}
+export async function saveUiPreferences(payload){
+ requireMember();const res=await client.from('pack_ui_preferences').upsert({pack_id:packId,user_id:user.id,payload},{onConflict:'pack_id,user_id'});fail(res,'Saving dashboard preferences');
+}
+export async function fetchAdventures(){
+ requireMember();const res=await client.from('adventure_catalog').select('id,den,title,kind,source_url').eq('pack_id',packId).order('title');fail(res,'Adventures');return res.data||[];
+}
+export async function saveAdventures(rows){
+ requireMember();if(!rows.length)return;
+ const res=await client.from('adventure_catalog').upsert(rows.map(r=>({...r,pack_id:packId})),{onConflict:'pack_id,den,title'});fail(res,'Importing adventures');
 }
 export async function fetchRoleNames(){
  requireMember();const res=await client.from('pack_role_names').select('role_key,display_name').eq('pack_id',packId);fail(res,'Pack role names');return Object.fromEntries((res.data||[]).map(r=>[r.role_key,r.display_name]));

@@ -27,7 +27,9 @@ import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-
 import {familyResponseCsv} from './family-ui.js';
 import {reconcileRoster} from './roster-sync.js';
 import {leaderContactText,leaderContactsCsv,contactSort} from './leader-contacts.js';
-import {fetchLeaderContacts,saveLeaderContact,fetchRoleNames,saveRoleName} from './cloud.js';
+import {fetchLeaderContacts,saveLeaderContact,saveAdminContact,fetchRoleNames,saveRoleName,fetchUiPreferences,saveUiPreferences,fetchAdventures,saveAdventures} from './cloud.js';
+import {parseAdventuresCsv} from './adventures.js';
+import {RELEASE} from './release-info.js';
 
 const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
@@ -35,12 +37,12 @@ let pwaInstallPrompt=null;
 const dbState=Object.fromEntries(TABLES.map(t=>[t,t==='settings'?[]:[]]));
 const ui={workflow:{available:false,requests:[],audit:[],notifications:[]},pickerOpen:false,budgetEditId:'',familyPreview:null,familySending:false,page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name',equipmentQuery:'',equipmentCategory:'all',equipmentSort:'name-asc',equipmentExport:'filtered',editEquipment:'',cloudError:'',cloudMembers:[],cloudInvites:[],familyForms:[],familyActive:'',familyResults:null,familySearch:'',familyLink:'',familyData:null,familySent:false,denChoice:''};
 const now=()=>Date.now();
-Object.assign(ui,{quickMenu:false,leaderContacts:[],roleNames:{}});
+Object.assign(ui,{quickMenu:false,leaderContacts:[],roleNames:{},editContactId:'',adventures:[],adventurePreview:null,denPlanId:'',equipmentGroup:'location',equipmentAttention:'',equipmentOpenId:'',customizeDashboard:false,hiddenCards:[],recent:null,collapsedEvent:{},saveStatus:''});
 const cloudActive=()=>Boolean(cloudState().member);
 async function writeSetting(key,value){
  const isShared=key==='activeScoutYear'||key.startsWith('finance');
  if(cloudActive()&&isShared&&['admin','cubmaster','treasurer'].includes(cloudState().member.role))await savePackSetting(key,value);
- return localWriteSetting(key,value);
+ const result=await localWriteSetting(key,value);ui.saveStatus=cloudActive()&&isShared?'Shared Pack setting saved':'Device setting saved';return result;
 }
 const cloudSettings=()=>resolveCloudConfiguration(PACK_CLOUD_CONFIG,{projectUrl:settings('supabaseUrl'),publishableKey:settings('supabasePublishableKey'),packId:settings('supabasePackId')});
 const cloudConfigured=()=>hasCloudConfiguration(cloudSettings());
@@ -51,9 +53,12 @@ async function put(table,row){
  if(table==='receipts'){
   await localPut(table,row);
   if(cloudActive()&&row.driveFileId){const {blob,...metadata}=row;await saveCloudRow(table,metadata)}
+  ui.saveStatus=row.driveFileId?'Receipt metadata shared; verify Drive upload':'Receipt saved on this device; Drive upload is separate';
   return;
  }
- return cloudActive()&&sharedTable(table)?saveCloudRow(table,row):localPut(table,row);
+ const shared=cloudActive()&&sharedTable(table);
+ const result=await (shared?saveCloudRow(table,row):localPut(table,row));
+ ui.saveStatus=shared?'Saved to shared Pack workspace':'Saved on this device';return result;
 }
 async function remove(table,id){
  if(table==='receipts'){const row=dbState.receipts.find(r=>r.id===id);if(cloudActive()&&row?.driveFileId)await deleteCloudRow(table,id);return localRemove(table,id)}
@@ -154,14 +159,45 @@ async function refresh(background=false){
   dbState.settings=[...byKey.values()];
  }
  if(cloudActive()){
-  [ui.leaderContacts,ui.roleNames]=await Promise.all([fetchLeaderContacts(),fetchRoleNames()]);
+  [ui.leaderContacts,ui.roleNames,ui.adventures,ui.preferences]=await Promise.all([fetchLeaderContacts(),fetchRoleNames(),fetchAdventures(),fetchUiPreferences()]);
+  ui.hiddenCards=ui.preferences.hiddenCards||[];ui.recent=ui.preferences.recent||null;
   try{ui.workflow=await loadTransactionWorkflow()}catch(e){ui.workflow={available:false,requests:[],audit:[],notifications:[],error:e.message}}
   const combined=combinedLedger(dbState.financeLedger,dbState.financeTags,ui.workflow.requests);dbState.financeLedger=combined.ledger;dbState.financeTags=combined.tags;
- }else {ui.leaderContacts=[];ui.roleNames={};ui.workflow={available:false,requests:[],audit:[],notifications:[]};}
+ }else {ui.leaderContacts=[];ui.roleNames={};ui.adventures=[];try{ui.preferences=JSON.parse(settings('uiPreferences')||'{}')}catch{ui.preferences={}}ui.hiddenCards=ui.preferences.hiddenCards||[];ui.recent=ui.preferences.recent||null;ui.workflow={available:false,requests:[],audit:[],notifications:[]};}
  if(background&&hasPendingForm(root,ui.pickerOpen)){ui.cloudChanged=true;return}
  render();
 }
 function settings(key){return dbState.settings.find(s=>s.key===key)?.value||'';}
+function draftKey(form){
+ const kind=form?.dataset.form;if(!['event','den-plan'].includes(kind))return '';
+ return 'packops-draft:'+cloudState().user.id+':'+kind+':'+(kind==='den-plan'?(ui.denChoice||'')+':'+(form.dataset.id||'new'):'new');
+}
+function saveDraftForm(form){
+ const key=draftKey(form);if(!key)return;
+ try{sessionStorage.setItem(key,JSON.stringify([...new FormData(form).entries()]));}catch{}
+}
+function clearDraftForm(form){const key=draftKey(form);if(key)sessionStorage.removeItem(key)}
+function restoreDraftForms(){
+ for(const form of root.querySelectorAll('[data-form="event"],[data-form="den-plan"]')){
+  let entries;try{entries=JSON.parse(sessionStorage.getItem(draftKey(form))||'null')}catch{}
+  if(!Array.isArray(entries))continue;
+  const values=new Map();for(const [name,value] of entries){if(!values.has(name))values.set(name,[]);values.get(name).push(value)}
+  for(const el of form.elements){if(!el.name||!values.has(el.name))continue;
+   if(el.type==='checkbox'||el.type==='radio')el.checked=values.get(el.name).includes(el.value);
+   else el.value=values.get(el.name)[0];
+  }
+  form.dataset.dirty='true';
+ }
+}
+async function persistUiPreferences(){
+ ui.preferences={hiddenCards:ui.hiddenCards,recent:ui.recent};
+ if(cloudActive())await saveUiPreferences(ui.preferences);
+ else await localWriteSetting('uiPreferences',JSON.stringify(ui.preferences));
+}
+function rememberRecent(kind,id,label){
+ if(!cloudActive())return;
+ ui.recent={kind,id,label};persistUiPreferences().catch(e=>console.warn('Recent workspace preference',e));
+}
 function activeYear(){return currentScoutYear(dbState.settings);}
 function annualDues(){return duesForYear(dbState.settings,activeYear());}
 async function saveSetting(key,value){await writeSetting(key,value);await refresh();}
@@ -177,6 +213,8 @@ async function persistGoogleConfiguration(config){
 }
 function route(view='home',event=''){
  ui.page=view;ui.eventId=event;ui.form='';ui.editTask='';ui.quickMenu=false;
+ if(view==='events'&&event&&findEvent(event))rememberRecent('event',event,findEvent(event).title);
+ else if(view==='budget'&&isFinanceReviewer(cloudState().member?.role))rememberRecent('finance',ui.financeTab,'Pack Finance');
  const hash='#'+view+(event?'/'+encodeURIComponent(event):'');
  if(location.hash!==hash)location.hash=hash;
  render();window.scrollTo({top:0,behavior:'instant'});
@@ -204,9 +242,10 @@ function render(){
   <div class="sidebar-footer"><small>Pack 179 · Built for the people making Scouting happen.<br>Records sync only after approved Google sign-in and backend setup.</small><button data-nav="settings">⚙ &nbsp; Settings & Drive</button></div></aside>
   <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-action="toggle-quick-menu" aria-label="Open quick access menu" aria-expanded="${ui.quickMenu}" aria-controls="quick-access">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">${cloudActive()?('● Shared Pack workspace'+(ui.cloudChanged?' · Refresh recommended':'')):'● Local / setup mode'}</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
   ${ui.quickMenu?'<div class="quick-menu-backdrop" data-action="close-quick-menu"></div><nav id="quick-access" class="quick-menu no-print" aria-label="Quick access"><strong>Jump to</strong><button data-nav="home">🏡 Home</button>'+MENU.map(m=>'<button data-nav="'+m.id+'">'+m.emoji+' '+esc(m.label)+'</button>').join('')+'<button data-nav="settings">⚙ Settings</button></nav>':''}
-  <div class="content">${ui.workflow.notifications.some(n=>!n.seen_at)?`<div class="note">New transaction submissions need review. ${btn('Open approvals','transaction-open','btn btn-small')}</div>`:''}${view()}</div></main>
+  <div class="content">${ui.saveStatus?`<div class="save-status" role="status">${esc(ui.saveStatus)}</div>`:''}${ui.workflow.notifications.some(n=>!n.seen_at)?`<div class="note">New transaction submissions need review. ${btn('Open approvals','transaction-open','btn btn-small')}</div>`:''}${view()}<footer class="app-credit">PackOps179 · Created for Pack 179 by Mike Gorski <span>v${esc(RELEASE.version)} · Released ${esc(RELEASE.date)}</span></footer></div></main>
   <nav class="mobile-bottom no-print" aria-label="Mobile navigation">${[{id:'home',emoji:'🏡',name:'Home'},{id:'calendar',emoji:'🗓️',name:'Calendar'},{id:'budget',emoji:'📊',name:'Finance'},{id:'receipts',emoji:'🧾',name:'Receipts'},{id:'events',emoji:'✅',name:'Events'}].map(t=>`<button class="mobile-tab${ui.page===t.id?' active':''}" data-nav="${t.id}"><span class="emoji">${t.emoji}</span>${t.name}</button>`).join('')}</nav>
  </div>`;
+ restoreDraftForms();
 }
 function view(){
  if(ui.page==='family')return familyPublicPage();
@@ -214,14 +253,38 @@ function view(){
  switch(ui.page){
  case 'contacts':return leaderDirectory();case 'families':return families();case 'den':return denWorkspace();case 'home':return home();case 'calendar':return calendar();case 'budget':return budget();case 'receipts':return receipts();case 'meeting':return meeting();case 'volunteers':return volunteers();case 'events':return events();case 'roster':return roster();case 'equipment':return equipment();case 'assistant':return assistant();case 'library':return library();case 'settings':return settingsPage();default:return home();}}
 function home(){
- const s=summary(dbState.tasks);const next=upcomingRecords()[0];
- return `<section class="hero"><div class="hero-copy"><span class="eyebrow" style="color:#eed69e">WELCOME TO PACKOPS</span><h2>Less organizing. More Scouting.</h2><p>Your Pack calendar, event planning, meeting guides, records and tools—all in one place, without replacing Scoutbook Plus.</p><div class="hero-action">${btn('✨ Review priorities','goto-assistant','btn btn-gold')}</div></div><div class="hero-symbol">⚜️</div></section>
- <div class="stats"><div class="stat"><div><strong>${dbState.events.length}</strong><span>Planned events</span></div><div class="stat-icon">🗓️</div></div><div class="stat"><div><strong>${s.open.length}</strong><span>Open responsibilities</span></div><div class="stat-icon">📋</div></div><div class="stat"><div><strong>${s.unassigned.length}</strong><span>Need an owner</span></div><div class="stat-icon">🤝</div></div><div class="stat"><div><strong>${s.overdue.length}</strong><span>Overdue in PackOps</span></div><div class="stat-icon">⏳</div></div></div>
- <section class="panel next-up-section"><div class="row-between"><div><span class="kicker">AT A GLANCE</span><h2>Upcoming Pack events</h2></div>${btn('See calendar →','goto-calendar','btn btn-outline btn-small')}</div>
- ${upcomingRecords().length?upcomingRecords().slice(0,4).map(e=>`<div class="event-preview-row"><div class="event-date-tile"><strong>${esc(e.date.slice(8,10))}</strong><span>${esc(new Date(e.date+'T12:00:00').toLocaleDateString('en-US',{month:'short'}))}</span></div><div style="flex:1;min-width:0"><strong>${esc(e.title)}</strong><div class="meta">${esc(e.source||'')} · ${niceDate(e.date)}${e.location?' · '+esc(e.location):''}</div></div>${e.id?.startsWith('google:')?btn(matchExistingWorkspace(e,dbState.events)?'Workspace':'Plan','calendar-plan','btn btn-outline btn-small','data-id="'+esc(e.id)+'"'):''}${e.url?link(e.url,'View','btn btn-ghost btn-small'):''}</div>`).join(''):`<p>No upcoming events loaded yet. Connect a Google Calendar or import an .ics calendar snapshot under Pack Calendar.</p>`}
- </section>
- <div class="section-head"><h2>Everything you need</h2><small>Choose a tool to get started</small></div><div class="tool-grid">${MENU.map(m=>`<button class="tool-card" data-nav="${m.id}"><span class="tool-icon tone-${m.tone}">${m.emoji}</span><strong>${esc(m.label)}</strong><small>${esc(m.sub)}</small></button>`).join('')}</div>
- <div class="banner-note"><span style="font-size:18px">💡</span><div><strong>PackOps v0.5 local workspace</strong><br>Calendar and Pack Drive links open live Pack resources. Event plans, checklists, budgets and roster records are stored locally in this browser until shared synchronization is built. ${next?`Next locally planned event: <strong>${esc(next.title)}</strong> (${niceDate(next.date)}).`:'Add an event to start your own planning workspace.'}</div></div>`;
+ const role=cloudState().member?.role;
+ const admin=['admin','cubmaster'].includes(role),reviewer=isFinanceReviewer(role);
+ const roster=groupScouts(dbState.roster),tasks=summary(dbState.tasks),next=upcomingRecords()[0];
+ const byDen=Object.entries(roster.reduce((map,r)=>{const den=r.den||'Unassigned';(map[den]??=[]).push(r);return map},{})).sort((a,b)=>a[0].localeCompare(b[0]));
+ const cards=[
+  ...(role==='volunteer'?[]:[{id:'scouts',label:role==='den_leader'?'Scouts in your den':'Scouts in roster',value:roster.length,icon:'📒',target:'roster',detail:byDen.map(([den,rows])=>den+' '+rows.length).join(' · ')}]),
+  ...(admin?[{id:'leaders',label:'Approved leaders',value:ui.cloudMembers.filter(m=>m.status==='active').length,icon:'👥',target:'settings',detail:'From active Pack access'}]:[]),
+  {id:'events',label:'Upcoming events',value:upcomingRecords().length,icon:'🗓️',target:'calendar'},
+  {id:'tasks',label:'Open responsibilities',value:tasks.open.length,icon:'📋',target:'volunteers'},
+  {id:'equipment',label:'Equipment needing repair',value:dbState.equipment.filter(x=>x.condition==='repair').length,icon:'🎒',target:'equipment'},
+  ...(reviewer?[{id:'approvals',label:'Finance reviews',value:ui.workflow.requests.filter(x=>['submitted','approved','payment_verified'].includes(x.status)).length,icon:'🧾',target:'budget'}]:[]),
+  {id:'families',label:'Open family forms',value:ui.familyForms.filter(x=>x.status==='open').length,icon:'📨',target:'families'}
+ ];
+ const visible=cards.filter(c=>!ui.hiddenCards.includes(c.id));
+ const attention=[
+  ...(reviewer&&ui.workflow.notifications.some(n=>!n.seen_at)?[{label:'Review new transaction submissions',action:'transaction-open'}]:[]),
+  ...tasks.unassigned.slice(0,2).map(t=>({label:'Assign: '+t.title,target:'volunteers'})),
+  ...tasks.overdue.slice(0,2).map(t=>({label:'Overdue: '+t.title,target:'volunteers'})),
+  ...(ui.familyForms.some(f=>f.status==='open')?[{label:'Review active family RSVPs',target:'families'}]:[]),
+  ...(next?[{label:'Prepare: '+next.title,target:'calendar'}]:[])
+ ].slice(0,5);
+ const recent=ui.recent;
+ const hasRecent=recent&&(recent.kind==='event'?!!findEvent(recent.id):recent.kind==='den'?dbState.denPlans.some(x=>x.id===recent.id):recent.kind==='finance'&&reviewer);
+ return `<section class="hero compact-hero"><div class="hero-copy"><span class="eyebrow" style="color:#eed69e">PACK 179 LEADERSHIP</span><h2>Less organizing. More Scouting.</h2><p>What needs attention across your approved Pack workspace.</p></div></section>
+ <div class="row-between section-head"><h2>At a glance</h2>${btn(ui.customizeDashboard?'Done':'Customize dashboard','dashboard-customize','btn btn-outline btn-small')}</div>
+ ${ui.customizeDashboard?`<section class="panel dashboard-customize"><h3>Show on Home</h3><div class="row wrap">${cards.map(c=>`<label class="review-toggle"><input type="checkbox" data-change="dashboard-card" value="${c.id}" ${ui.hiddenCards.includes(c.id)?'':'checked'}>${esc(c.label)}</label>`).join('')}</div>${btn('Restore defaults','dashboard-reset','btn btn-ghost btn-small')}</section>`:''}
+ ${visible.length?`<div class="stats">${visible.map(c=>`<button class="stat dashboard-card" data-nav="${c.target}"><div><strong>${c.value}</strong><span>${esc(c.label)}</span>${c.detail?'<small>'+esc(c.detail)+'</small>':''}</div><div class="stat-icon">${c.icon}</div></button>`).join('')}</div>`:'<div class="note">All cards are hidden. Use Customize dashboard to bring them back.</div>'}
+ <div class="split-equal dashboard-panels"><section class="panel stack"><h2>Needs my attention</h2>${attention.length?attention.map(a=>`<button class="attention-row" ${a.action?'data-action="'+a.action+'"':'data-nav="'+a.target+'"'}>${esc(a.label)} →</button>`).join(''):empty('✅','No urgent items recorded','New tasks, events, and approvals will appear here.')}</section>
+ <section class="panel stack"><h2>Pick up where you left off</h2>${hasRecent?btn('Continue: '+short(recent.label,54),'resume-recent','btn btn-outline'): '<p>No recent saved workspace yet. Open an event, den meeting, or finance area to start.</p>'}
+ ${next?`<div class="meta">Next event: ${esc(next.title)} · ${niceDate(next.date)}</div>`:''}
+ <p class="meta">Counts come from your accessible roster, Pack membership, tasks, and forms. Den leaders see their authorized den only. Google calendar events refresh when connected.</p></section></div>
+ <div class="section-head"><h2>All tools</h2><small>Choose a section</small></div><div class="tool-grid">${MENU.map(m=>`<button class="tool-card" data-nav="${m.id}"><span class="tool-icon tone-${m.tone}">${m.emoji}</span><strong>${esc(m.label)}</strong><small>${esc(m.sub)}</small></button>`).join('')}</div>`;
 }
 function calendar(){
  const current=settings('calendarId');const available=ui.calendars.length?ui.calendars:[...(current?[{id:current,name:settings('calendarName')||'Selected calendar'}]:[])];
@@ -283,7 +346,7 @@ function volunteers(){
  <div class="metric-grid" style="margin-bottom:18px"><div class="metric"><div class="number-big">${s.open.length}</div><span>Open</span></div><div class="metric"><div class="number-big">${s.unassigned.length}</div><span>Need an owner</span></div><div class="metric"><div class="number-big">${tasks.filter(t=>t.status==='done').length}</div><span>Completed</span></div></div>
  <div class="split"><div class="stack">${ui.form==='task'||ui.form==='edit-task'?taskForm(ui.editTask?tasks.find(t=>t.id===ui.editTask):null):''}<section class="panel"><div class="row-between"><h2>Responsibilities</h2><span class="pill">${tasks.length} total</span></div>${tasks.length?tasks.map(taskRow).join(''):empty('🤝','Nothing assigned yet','Create jobs, deadlines, and owner requests. Volunteers can still respond by normal email.',btn('+ Add first task','show-task','btn'))}</section></div><section class="panel stack"><h3>How this works</h3><p>Assign a job, add the leader’s email, and use “Draft email.” Your regular mail app opens a prefilled message for review. PackOps does not send anything automatically.</p>${note('Volunteer replies do not automatically change task status in this first version. Update the status here when someone confirms. For live RSVP/poll links, open Family RSVPs from the left navigation when Supabase is configured.')}<h3>Existing Pack records</h3><p>Your working Operations & Ownership Plan remains available as a reference while we develop synchronized shared task records.</p>${link(LINKS.operations,'Open ownership plan','btn btn-ghost btn-full')}</section></div>`;
 }
-function eventForm(){return `<section class="panel"><div class="row-between"><h2>Create a local event workspace</h2>${btn('✕ Close','cancel-form','btn btn-ghost btn-small')}</div><p>This does not create an official Scoutbook Plus calendar event.</p><form data-form="event" class="stack"><div class="form-grid">${field('Event title','title','text','','required maxlength="120"')}${field('Date','date','date')}${field('Location','location')}${field('Event lead','owner')}${textarea('Preparation notes','notes','','rows="3"')}${textarea('Related links (one URL per line)','links','','rows="3"')}</div><div class="form-actions"><button class="btn" type="submit">Create event workspace</button></div></form></section>`}
+function eventForm(){return `<section class="panel"><div class="row-between"><h2>Create a local event workspace</h2>${btn('✕ Close','cancel-form','btn btn-ghost btn-small')}</div><p>This does not create an official Scoutbook Plus calendar event.</p><form data-form="event" class="stack"><div class="form-grid">${field('Event title','title','text','','required maxlength="120"')}${field('Date','date','date')}${field('Location','location')}${field('Event lead','owner')}${textarea('Preparation notes','notes','','rows="3"')}${textarea('Related links (one URL per line)','links','','rows="3"')}</div><div class="form-actions"><button class="btn" type="submit">Create event workspace</button>${btn('Discard draft','discard-event-draft','btn btn-ghost')}</div><p class="meta">Unfinished entries are saved in this browser session until submitted or discarded.</p></form></section>`}
 function eventDetail(e){
  const tasks=dbState.tasks.filter(t=>t.eventId===e.id);const rate=completion(tasks);
  const att=dbState.attachments.filter(a=>a.eventId===e.id);
@@ -298,9 +361,9 @@ function eventDetail(e){
  ${intro('Event workspace',e.title,`${niceDate(e.date)} · ${e.location||'Location not recorded'} · Lead: ${e.owner||'Unassigned'}`)}
  <section class="panel stack" style="margin-bottom:18px"><h2>Event lead &amp; details</h2>${cloudActive()&&!['admin','cubmaster'].includes(cloudState().member.role)?`<p><strong>Lead:</strong> ${esc(e.owner||'Unassigned')}</p>`:`<form data-form="event-details" data-id="${esc(e.id)}" class="stack"><div class="form-grid">${field('Event lead','owner','text',e.owner||'','maxlength="120"')}${e.googleEventId?'':field('Date','date','date',e.date||'')+field('Location','location','text',e.location||'','maxlength="240"')}</div><button class="btn btn-small" type="submit">Save event details</button></form>`}<p class="meta">Lead assignment is separate from checklist responsibilities.</p></section>
  ${e.googleEventId?'<section class="panel stack" style="margin-bottom:18px"><div class="row-between"><strong>↻ Linked to Google Calendar</strong>'+(e.calendarUrl?link(e.calendarUrl,'View original event','btn btn-outline btn-small'):'')+'</div><p class="meta">The title, date and location follow Google Calendar on refresh. Notes, tasks, receipts and budgets stay in PackOps.</p>'+(e.description?'<p>'+esc(e.description)+'</p>':'')+'</section>':''}
- <div class="split"><div class="stack"><section class="panel"><div class="row-between"><h2>Preparation checklist</h2>${btn('+ Add checklist task','show-event-task','btn btn-small')}</div>${rate!==null?`<div class="preview-strip" style="margin:12px 0"><strong>${rate}% of recorded tasks complete</strong><span class="pill">${tasks.length} checklist items</span></div><div class="progress" style="margin-bottom:12px"><span style="width:${rate}%"></span></div>`:note('No tasks yet. Readiness is unknown until checklist tasks are entered.',true)}${tasks.length?tasks.map(taskRow).join(''):''}</section>${ui.form==='task'||ui.form==='edit-task'?taskForm(ui.editTask?dbState.tasks.find(t=>t.id===ui.editTask):null,e.id):''}
- <section class="panel"><h2>Event notes & links</h2><form data-form="event-notes" data-id="${e.id}" class="stack">${textarea('Planning notes','notes',e.notes,'rows="8"')}${textarea('Document or Scoutbook URLs, one per line','links',e.links||'','rows="4"')}<div class="form-actions"><button class="btn" type="submit">Save notes</button></div></form>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).length?`<div class="divider"></div><h3>Linked resources</h3>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).map(x=>`<p style="overflow-wrap:anywhere">${link(x,short(x,60),'btn btn-outline btn-small')}</p>`).join('')}`:''}</section></div>
- <div class="stack"><section class="panel stack"><div class="row-between"><h2>Event finances</h2>${btn('View budget','event-go-finance','btn btn-outline btn-small')}</div><div class="finance-metrics"><div class="finance-kpi"><small>Budget allocations</small><strong>${money(planned)}</strong></div><div class="finance-kpi"><small>Classified ledger spending</small><strong>${money(spent)}</strong></div><div class="finance-kpi"><small>Reimbursement requests</small><strong>${requestCount}</strong></div><div class="finance-kpi"><small>Linked receipts</small><strong>${receiptCount}</strong></div></div><p class="meta">Only tagged ledger transactions count as actual spending. Requests are not automatically expenses.</p>${btn('Submit event reimbursement','event-reimburse','btn btn-small')}${btn('Add event receipt','event-receipt','btn btn-outline btn-small')}
+ <div class="split event-sections"><details class="event-fold" open><summary>Checklist & notes</summary><div class="stack"><section class="panel"><div class="row-between"><h2>Preparation checklist</h2>${btn('+ Add checklist task','show-event-task','btn btn-small')}</div>${rate!==null?`<div class="preview-strip" style="margin:12px 0"><strong>${rate}% of recorded tasks complete</strong><span class="pill">${tasks.length} checklist items</span></div><div class="progress" style="margin-bottom:12px"><span style="width:${rate}%"></span></div>`:note('No tasks yet. Readiness is unknown until checklist tasks are entered.',true)}${tasks.length?tasks.map(taskRow).join(''):''}</section>${ui.form==='task'||ui.form==='edit-task'?taskForm(ui.editTask?dbState.tasks.find(t=>t.id===ui.editTask):null,e.id):''}
+ <section class="panel"><h2>Event notes & links</h2><form data-form="event-notes" data-id="${e.id}" class="stack">${textarea('Planning notes','notes',e.notes,'rows="8"')}${textarea('Document or Scoutbook URLs, one per line','links',e.links||'','rows="4"')}<div class="form-actions"><button class="btn" type="submit">Save notes</button></div></form>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).length?`<div class="divider"></div><h3>Linked resources</h3>${(e.links||'').split('\n').map(x=>x.trim()).filter(safeUrl).map(x=>`<p style="overflow-wrap:anywhere">${link(x,short(x,60),'btn btn-outline btn-small')}</p>`).join('')}`:''}</section></div></details>
+ <details class="event-fold"><summary>Finance, gear & files</summary><div class="stack"><section class="panel stack"><div class="row-between"><h2>Event finances</h2>${btn('View budget','event-go-finance','btn btn-outline btn-small')}</div><div class="finance-metrics"><div class="finance-kpi"><small>Budget allocations</small><strong>${money(planned)}</strong></div><div class="finance-kpi"><small>Classified ledger spending</small><strong>${money(spent)}</strong></div><div class="finance-kpi"><small>Reimbursement requests</small><strong>${requestCount}</strong></div><div class="finance-kpi"><small>Linked receipts</small><strong>${receiptCount}</strong></div></div><p class="meta">Only tagged ledger transactions count as actual spending. Requests are not automatically expenses.</p>${btn('Submit event reimbursement','event-reimburse','btn btn-small')}${btn('Add event receipt','event-receipt','btn btn-outline btn-small')}
  <h3>Plan an expense for this event</h3><form data-form="event-budget" data-id="${esc(e.id)}" class="stack"><div class="form-grid">
  ${select('Budget category','category',EXPENSE_CATEGORIES.map(x=>[x,x]))}
  ${field('Item / purpose','detail','text','','required maxlength="120"')}
@@ -312,7 +375,7 @@ function eventDetail(e){
  ${equipmentNeeded.length?equipmentNeeded.map(item=>`<div class="row-between list-item"><div><strong>${esc(item.name)}</strong><div class="meta">${esc(item.category||'General Equipment')} · Qty ${esc(String(item.quantity??1))} · ${esc(item.location||'Location unknown')}</div></div>${btn('Remove','event-remove-equipment','btn btn-danger btn-small',`data-id="${esc(item.id)}"`)} </div>`).join(''):'<p class="meta">No inventory items linked to this event.</p>'}
  <form data-form="event-equipment" data-id="${esc(e.id)}" class="row wrap">${select('Add from inventory','equipmentId',dbState.equipment.map(item=>[item.id,item.name+' · '+(item.location||'Location unknown')]))}<button class="btn btn-small" type="submit" ${dbState.equipment.length?'':'disabled'}>Add equipment</button></form>
  </section><section class="panel"><h2>Event attachments</h2><p>Choose a file, then tap Attach file. Files up to 15 MB are saved on this device. To share, upload the file to your restricted Pack Drive folder and add its link in Event notes &amp; links.</p><form data-form="attachment" data-id="${e.id}"><div class="field"><input type="file" name="file" class="input" required aria-label="Event attachment"></div><div class="form-actions"><span class="meta" data-file-status>No file selected</span><button class="btn btn-small" type="submit">Attach file</button></div></form>${att.length?att.map(a=>`<div class="list-item"><div class="row-between"><strong style="font-size:12px;overflow-wrap:anywhere">📎 ${esc(a.fileName)}</strong><div class="row">${btn('Open','open-attachment','btn btn-ghost btn-small',`data-id="${a.id}"`)}${btn('×','delete-attachment','btn btn-danger btn-small',`data-id="${a.id}"`)}</div></div></div>`).join(''):`<p class="muted">No files attached yet.</p>`}</section>
- <section class="panel stack"><h3>Official event</h3><p>Set the official calendar entry and RSVP through Scoutbook Plus. Paste its link into your event notes when available.</p>${link(LINKS.scoutbook,'Open Scoutbook Plus','btn btn-outline btn-full')}${link(LINKS.packDrive,'Open Pack Drive','btn btn-ghost btn-full')}</section></div></div>`;
+ <section class="panel stack"><h3>Official event</h3><p>Set the official calendar entry and RSVP through Scoutbook Plus. Paste its link into your event notes when available.</p>${link(LINKS.scoutbook,'Open Scoutbook Plus','btn btn-outline btn-full')}${link(LINKS.packDrive,'Open Pack Drive','btn btn-ghost btn-full')}</section></div></details></div>`;
 }
 function events(){const chosen=ui.eventId&&findEvent(ui.eventId);if(chosen)return eventDetail(chosen);
  const rows=[...dbState.events].sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'));
@@ -327,7 +390,7 @@ function roster(){
  const selected=ui.rosterSelected.size,visibleSelected=rows.filter(r=>ui.rosterSelected.has(r.id)).length;
  return `${intro('Private leadership reference','Pack Roster','Filter by exact den or rank, sort Scout records, and export only the selected fields and Scouts.',link(LINKS.scoutbook,'Official Scoutbook roster'))}
  ${btn('Leader contacts','goto-contacts','btn btn-outline')}
- ${note('<strong>Private roster:</strong> Copies remain in this device’s browser storage. No server-side access control exists in v0.2. Do not use this on shared devices; never commit Scout CSVs or exported contact lists to GitHub.',true)}
+ ${note('<strong>Private roster:</strong> Approved leaders see their authorized Pack or den records in shared mode. Local copies and exported CSV files still require a trusted device; never commit Scout contacts to GitHub.',true)}
  <section class="panel stack"><div class="row-between"><h2>Import & review</h2><span class="pill">${scouts.length} unique Scouts · ${dbState.roster.length} source rows</span></div><p>Supports the October 10 Scoutbook export: den labels such as “Webelos 2,” “Wolf 6” and “1” stay exactly as exported. Den/rank disagreements and ambiguous den numbers are flagged for review, not silently corrected.</p>
  <form data-form="roster" class="row wrap"><div class="field" style="flex:1;min-width:240px"><label for="roster-file">Scoutbook roster (.csv)</label><input class="input" type="file" id="roster-file" name="file" accept=".csv,text/csv,text/plain" required></div><button class="btn" type="submit">Preview CSV issues</button>${dbState.roster.length?btn('Clear local roster','clear-roster','btn btn-danger'):''}</form>
  ${ui.rosterPreview?`<div class="preview-strip"><strong>${ui.rosterPreview.records.length} Scout records found</strong><span class="pill warning">${ui.rosterPreview.warnings.length} flagged rows</span></div><p>${esc(importPrivacySummary(ui.rosterPreview))}</p><div class="review-list">${ui.rosterPreview.warnings.slice(0,20).map(w=>`<div class="list-item"><strong>CSV row ${w.row}</strong><div class="meta">${esc(w.issues.join('; '))}</div></div>`).join('')}</div>${btn('Import working copy — keep flagged rows','commit-roster','btn btn-full')}`:''}</section>
@@ -346,31 +409,37 @@ function roster(){
  ${!selected?'<span class="meta">Select Scouts above before exporting.</span>':''}</section>`;
 }
 function equipment(){
- const categorySet=[...new Set([...EQUIPMENT_CATEGORIES,...dbState.equipment.map(r=>normalizeEquipment(r).category)])].sort((a,b)=>a.localeCompare(b));
- const rows=queryEquipment(dbState.equipment,{search:ui.equipmentQuery,category:ui.equipmentCategory,sort:ui.equipmentSort});
+ const categories=[...new Set([...EQUIPMENT_CATEGORIES,...dbState.equipment.map(r=>normalizeEquipment(r).category)])].sort();
+ const all=dbState.equipment.map(normalizeEquipment);
+ const attention={repair:all.filter(r=>r.condition==='repair').length,verify:all.filter(r=>r.condition==='verify'||!r.verifiedAt).length,held:all.filter(r=>r.holder).length,missing:all.filter(r=>!r.location).length};
+ const requires=(r,key)=>key==='repair'?r.condition==='repair':key==='verify'?r.condition==='verify'||!r.verifiedAt:key==='held'?!!r.holder:key==='missing'?!r.location:true;
+ const rows=queryEquipment(dbState.equipment,{search:ui.equipmentQuery,category:ui.equipmentCategory,sort:ui.equipmentSort}).filter(r=>requires(r,ui.equipmentAttention));
  const editing=dbState.equipment.find(r=>r.id===ui.editEquipment);
- const itemForm=(editing||ui.form==='equipment')?`<section class="panel stack"><h2>${editing?'Edit equipment':'Add equipment'}</h2>
- <form data-form="equipment" data-edit-id="${esc(editing?.id||'')}" class="stack"><div class="form-grid">
+ const groups=new Map();
+ for(const row of rows){const key=ui.equipmentGroup==='category'?row.category:(row.location||'Location needed');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row)}
+ const itemForm=(editing||ui.form==='equipment')?`<section class="panel stack"><h2>${editing?'Edit equipment':'Add equipment'}</h2><form data-form="equipment" data-edit-id="${esc(editing?.id||'')}" class="stack"><div class="form-grid">
  ${field('Item / kit name','name','text',editing?.name||'','required maxlength="120"')}
- <div class="field"><label for="equipment-category-name">Category</label><input id="equipment-category-name" class="input" type="text" name="category" list="equipment-categories" value="${esc(editing?.category||'General Equipment')}" required maxlength="100"><datalist id="equipment-categories">${categorySet.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist></div>
+ <div class="field"><label for="equipment-category-name">Category</label><input id="equipment-category-name" class="input" type="text" name="category" list="equipment-categories" value="${esc(editing?.category||'General Equipment')}" required maxlength="100"><datalist id="equipment-categories">${categories.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist></div>
  ${field('Quantity','quantity','number',String(editing?.quantity??1),'min="0" max="999999" step="1" required')}
  ${field('Storage location','location','text',editing?.location||'')}
  ${field('Checked out to / held by','holder','text',editing?.holder||'')}
  ${select('Condition','condition',[['ready','Ready'],['verify','Needs verification'],['repair','Repair required']],editing?.condition||'ready')}
  ${field('Last physically verified','verifiedAt','date',editing?.verifiedAt||'')}
- </div>${textarea('Kit contents / notes','notes',editing?.notes||'')}
- <div class="form-actions"><button type="submit" class="btn">${editing?'Save changes':'Add to inventory'}</button>${btn('Cancel','equipment-cancel','btn btn-outline')}</div></form></section>`:'';
- return `${intro('Know what the Pack owns','Equipment & Supplies','Search by item, category, storage location, holder or contents. Export what you see, or your full list.',btn('+ Add equipment','show-equipment','btn'))}
+ </div>${textarea('Kit contents (optional)','kitContents',editing?.kitContents||'')}${textarea('Notes','notes',editing?.notes||'')}
+ <div class="form-actions"><button class="btn" type="submit">${editing?'Save changes':'Add to inventory'}</button>${btn('Cancel','equipment-cancel','btn btn-outline')}</div></form></section>`:'';
+ return `${intro('Know what the Pack owns','Equipment & Supplies','Find gear by storage location or category. Tap an item for its details.',btn('+ Add equipment','show-equipment','btn'))}
  ${itemForm}
- <section class="panel stack"><div class="row-between"><h2>Equipment inventory</h2><span class="pill">${rows.length} of ${dbState.equipment.length} matching</span></div>
- <div class="equipment-controls">
- <div class="field"><label for="equipment-search">Find equipment</label><input id="equipment-search" class="input" name="equipment-search" type="search" autocomplete="off" placeholder="Try rocket, flags, storage, or a leader…" value="${esc(ui.equipmentQuery)}"></div>
- ${select('Category','equipment-filter', [['all','All categories'],...categorySet.map(x=>[x,x])],ui.equipmentCategory,'data-change="equipment-filter"')}
- ${select('Sort by','equipment-sort',[['name-asc','Name A–Z'],['name-desc','Name Z–A'],['category','Category'],['location','Location'],['condition','Condition'],['verified','Last verified']],ui.equipmentSort,'data-change="equipment-sort"')}
- </div>
- <div class="row wrap">${btn('Export matching ('+rows.length+') CSV','equipment-export','btn btn-outline', 'data-scope="filtered"')}${btn('Export entire inventory CSV','equipment-export','btn btn-outline','data-scope="all"')}${ui.equipmentQuery?btn('Clear search','equipment-clear-search','btn btn-ghost'):''}</div>
- <p class="meta">Search updates as you type, ranking word beginnings before other matches. CSV opens in Excel or Google Sheets. Inventory records remain editable and are not modified by export.</p></section>
- ${rows.length?`<div class="cards">${rows.map(r=>`<article class="event-card"><div class="row-between"><h3>${esc(r.name)}</h3><span class="pill ${r.condition==='repair'?'danger':r.condition==='ready'?'success':'warning'}">${r.condition==='repair'?'Repair':r.condition==='ready'?'Ready':'Verify'}</span></div><div class="row-between"><span class="pill info">${esc(r.category)}</span><strong>Qty ${r.quantity}</strong></div><div class="small-info">📍 ${esc(r.location||'Location not specified')}</div><div class="small-info">${r.holder?'👤 With '+esc(r.holder):'No current holder specified'}</div>${r.verifiedAt?`<div class="meta">Last verified ${esc(r.verifiedAt)}</div>`:''}${r.notes?`<p>${esc(r.notes)}</p>`:''}<div class="row wrap">${btn('Edit','equipment-edit','btn btn-outline btn-small',`data-id="${esc(r.id)}"`)}${btn('Change status','equipment-status','btn btn-outline btn-small',`data-id="${esc(r.id)}"`)}${btn('Remove','delete-equipment','btn btn-danger btn-small',`data-id="${esc(r.id)}"`)}</div></article>`).join('')}</div>`:dbState.equipment.length?empty('🔍','No matches','Change your search or category to find equipment.'):empty('🎒','Inventory starts here','Add the rocket kit, Pack flags, tents and camp equipment.',btn('+ Add first item','show-equipment','btn'))}`;
+ <section class="panel stack"><div class="row-between"><h2>Needs attention</h2><span class="pill">${all.length} inventory entries</span></div>
+ <div class="row wrap">${[['repair','Repair',attention.repair],['verify','Verify',attention.verify],['held','With a leader',attention.held],['missing','No location',attention.missing]].map(([key,label,n])=>btn(label+' · '+n,'equipment-attention',ui.equipmentAttention===key?'btn btn-small':'btn btn-outline btn-small',`data-id="${key}"`)).join('')}${ui.equipmentAttention?btn('Show all','equipment-attention','btn btn-ghost btn-small'):''}</div>
+ <div class="equipment-controls"><div class="field"><label for="equipment-search">Find gear</label><input id="equipment-search" class="input" name="equipment-search" type="search" value="${esc(ui.equipmentQuery)}" placeholder="Rocket kit, flags, closet…"></div>
+ ${select('Category','equipment-filter',[['all','All categories'],...categories.map(x=>[x,x])],ui.equipmentCategory,'data-change="equipment-filter"')}
+ ${select('Group by','equipment-group',[['location','Storage location'],['category','Category']],ui.equipmentGroup,'data-change="equipment-group"')}
+ </div><div class="row wrap">${btn('Export matching CSV','equipment-export','btn btn-outline btn-small','data-scope="filtered"')}${btn('Export all CSV','equipment-export','btn btn-outline btn-small','data-scope="all"')}</div></section>
+ ${rows.length?[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([group,items])=>`<section class="panel equipment-group"><div class="row-between"><h2>${esc(group)}</h2><span class="pill">${items.length} entries</span></div>
+ ${items.map(r=>`<div class="equipment-line"><button class="equipment-line-main" data-action="equipment-open" data-id="${esc(r.id)}" aria-expanded="${ui.equipmentOpenId===r.id}"><strong>${esc(r.name)}</strong><span>Qty ${r.quantity} · ${esc(r.condition==='repair'?'Repair':r.condition==='ready'?'Ready':'Verify')}</span></button>
+ ${ui.equipmentOpenId===r.id?`<div class="equipment-detail"><div>${esc(r.category)} · ${esc(r.location||'Location needed')}</div><div>${r.holder?'With '+esc(r.holder):'Not checked out'} · ${r.verifiedAt?'Verified '+esc(r.verifiedAt):'Never verified'}</div>${r.kitContents?'<p><strong>Kit contents:</strong> '+esc(r.kitContents)+'</p>':''}${r.notes?'<p>'+esc(r.notes)+'</p>':''}<div class="row wrap">${btn('Edit','equipment-edit','btn btn-outline btn-small',`data-id="${esc(r.id)}"`)}${btn('Mark verified','equipment-verify','btn btn-outline btn-small',`data-id="${esc(r.id)}"`)}${r.holder?btn('Return to storage','equipment-return','btn btn-outline btn-small',`data-id="${esc(r.id)}"`):''}${btn('Change condition','equipment-status','btn btn-ghost btn-small',`data-id="${esc(r.id)}"`)}${btn('Remove','delete-equipment','btn btn-danger btn-small',`data-id="${esc(r.id)}"`)}</div></div>`:''}</div>`).join('')}
+ </section>`).join(''):empty('🎒',all.length?'No matching gear':'Inventory starts here',all.length?'Clear a filter or search to see more gear.':'Add the Pack flags, rocket kit, tents and supplies.')}
+ `;
 }
 function families(){
  const state=cloudState();
@@ -389,7 +458,7 @@ function denWorkspace(){
  const allowed=role?.role==='den_leader'?(role.den_scopes||[]):DEN_NAMES;
  const selected=allowed.includes(ui.denChoice)?ui.denChoice:allowed[0]||'';
  ui.denChoice=selected;
- return denWorkspaceView({state:dbState,den:selected,allowed,esc,btn,field,select,textarea,intro,note})+leaderDirectory(true);
+ return denWorkspaceView({state:{...dbState,roster:groupScouts(dbState.roster)},den:selected,allowed,catalog:ui.adventures,planId:ui.denPlanId,preview:ui.adventurePreview,esc,btn,field,select,textarea,intro,note})+leaderDirectory(true);
 }
 function assistant(){
  const s=summary(dbState.tasks);const issue=[...s.overdue,...s.unassigned.filter(x=>!s.overdue.includes(x)),...s.dueSoon.filter(x=>!s.overdue.includes(x)&&!s.unassigned.includes(x))].slice(0,12);
@@ -408,15 +477,16 @@ function library(){
 function settingsPage(){
  const panel=cloudSettingsPanel({state:cloudState(),configured:cloudSettings(),setupError:ui.cloudError,members:ui.cloudMembers,invites:ui.cloudInvites,esc,btn,field,select,note});
  if(cloudConfigured()&&!cloudActive())return `${intro('Private Pack data','Security & Google login','Sign in with an approved Pack Google account to access PackOps.')}${panel}`;
- return `${panel}${intro('Your device and Drive','Settings','Local privacy controls and optional, user-authorized Google Drive receipt uploads.')}
+ return `${panel}${intro('Your device and Drive','Settings','Pack preferences and optional, user-authorized Google Drive receipt uploads.')}
  ${roleNameSettings()}
+ <section class="panel stack" style="margin-bottom:20px"><h2>About PackOps179</h2><p>Created for Pack 179 by Mike Gorski.</p><p>Version <strong>${esc(RELEASE.version)}</strong> · Released <strong>${esc(RELEASE.date)}</strong></p><p>${esc(RELEASE.notes)}</p></section>
  <div class="split"><section class="panel stack"><h2>Connect Google services</h2><p>For receipt uploads, enable Drive API and Picker API. For upcoming events, enable Google Calendar API and grant calendar.readonly access. Use a Google OAuth Web Client ID authorized for your PackOps website. Tokens stay in memory; never enter client secrets.</p><p>Calendar connection status: <strong>${calendarConnected()?'Authorized for this session':'Not connected'}</strong>. Open Pack Calendar to select a calendar.</p>
  <form data-form="google-settings" class="stack">${field('Google OAuth web client ID','googleClientId','text',settings('googleClientId'),'placeholder="12345-abcdef.apps.googleusercontent.com" autocomplete="off"')}${field('Google Picker API key','googleApiKey','text',settings('googleApiKey'),'placeholder="AIza..." autocomplete="off"')}<button class="btn" type="submit">Save configuration on this device</button></form>
  <p class="meta">OAuth Client ID: <strong>${settings('googleClientId')?'Saved on this device':'NOT SAVED'}</strong> · Picker API key: <strong>${settings('googleApiKey')?'Saved on this device':'Not saved'}</strong></p>
  <p class="meta">You can also enter the Client ID above and click Sign in to Google directly; PackOps will save it after successful authorization. Copy the Web Client ID, never the client secret.</p>
  <p>Status: <strong>${connected()?'Authorized for this session':'Not connected'}</strong></p>${btn('Sign in to Google','google-sign-in','btn btn-full')}${btn('Choose 2026–27 receipts destination','google-pick-folder','btn btn-outline btn-full')}${settings('googleFolder')?`<p class="setting-kv">Chosen destination: ${esc(settings('googleFolderName'))} (${esc(settings('googleFolder'))})</p>`:''}${btn('Disconnect','google-disconnect','btn btn-ghost btn-full')}
  <div class="privacy-strip">You must explicitly authorize the app and select the proper destination folder. The Drive API only uploads receipts when you click Upload. There is no background access to roster files or finances.</div></section>
- <section class="panel stack"><h2>Data & privacy</h2><p>This version saves event plans, roster copies, budgets, Scout credit snapshots, reimbursement proposals, volunteer tasks, and receipts in this browser's IndexedDB. Clearing browser storage removes local data. Different devices do not yet synchronize these records.</p><p>Never import private youth records onto shared or public devices. This version has no server-based role permissions.</p>${btn('Clear all local working data','clear-local','btn btn-danger btn-full')}${link(LINKS.packDrive,'Open authorized Pack Drive','btn btn-outline btn-full')}</section></div>
+ <section class="panel stack"><h2>Data & privacy</h2><p>Approved shared records sync through Supabase. Device-only settings, unfinished drafts, and receipt files remain on this device until explicitly uploaded or saved. Clearing browser storage removes device-only data.</p><p>Do not import private youth records onto public devices. Pack and den access is enforced by shared backend permissions.</p>${btn('Clear all local working data','clear-local','btn btn-danger btn-full')}${link(LINKS.packDrive,'Open authorized Pack Drive','btn btn-outline btn-full')}</section></div>
  <section class="panel stack" style="margin-top:20px"><h2>Scout year & Pack dues</h2>
  <p>Configure annual dues separately for every Scout year. Updating dues changes local forecasts and discrepancy checks, but NEVER rewrites the Treasurer's official Google Sheets formulas or financial records.</p>
  <form data-form="pack-year-config" class="form-grid">
@@ -432,7 +502,7 @@ function settingsPage(){
  ${field('Approved budget / planning document (optional)','budgetUrl','url',settings('financeBudgetUrl:'+activeYear()))}
  ${field('Restricted receipt folder (optional)','receiptsUrl','url',settings('financeReceiptsUrl:'+activeYear())||(activeYear()==='2026-27'?LINKS.receipts2026:''))}
  <button class="btn" type="submit">Save Drive sources for ${esc(activeYear())}</button></form>
- <p class="meta">Authorized native Scout credit Sheets can refresh read-only. For Excel treasurer ledgers, use the CSV import until workbook synchronization is implemented.</p></section>
+ <p class="meta">Authorized native Scout credit Sheets can refresh read-only. The official Treasurer ledger remains a Google Sheet; PackOps snapshots and transaction posting require the separately configured secure bridge.</p></section>
   <section class="panel stack" style="margin-top:20px"><h2>Encrypted Backup & Rebuild</h2>
  <p>Rebuild PackOps on a new phone or computer by importing one encrypted backup containing all local events, tasks, budgets, Scout account snapshots, reimbursements, categories, and receipts. Google authorization must be reconnected on the new device.</p>
  <div class="privacy-strip">Backups contain sensitive Scout and financial records. Admins can export their authorized cloud snapshot in shared mode; restoration is LOCAL only and does not replace Supabase records. Use a 12+ character passphrase and restricted Drive folder. If the passphrase is lost, the backup cannot be recovered.</div>
@@ -461,16 +531,31 @@ function leaderDirectory(compact=false){
  if(!cloudActive())return '';
  const self=ui.leaderContacts.find(x=>x.user_id===cloudState().user.id);
  const contacts=ui.leaderContacts.slice().sort(contactSort);
- return `${compact?'<section class="panel stack" style="margin-top:20px">':intro('Pack leadership','Leader contacts','Each approved leader fills in their own contact details. All approved Pack members can copy a contact or export the directory.')+'<section class="panel stack">'}
+ const admin=['admin','cubmaster'].includes(cloudState().member.role);
+ const editing=contacts.find(x=>x.id===ui.editContactId);
+ const dens=[...new Set([...DEN_NAMES,...groupScouts(dbState.roster).map(x=>x.den).filter(Boolean)])].sort();
+ const denOptions=[['','No den / Pack role'],...dens.map(d=>[d,d])];
+ const roles=['Cubmaster','Assistant Cubmaster','Treasurer','Activities Director','Committee Chair','Committee Member','Den Leader','Advancement Chair','Pinewood Derby Lead','Other'];
+ return `${compact?'<section class="panel stack" style="margin-top:20px">':intro('Pack leadership','Leader contacts','Adult contacts for approved Pack leaders. Admins can create cards before a leader signs in.')+'<section class="panel stack">'}
  <div class="row-between"><h2>${compact?'Your contact details & directory':'Leader directory'}</h2>${btn('Export leaders (.csv)','leaders-export','btn btn-outline btn-small',contacts.length?'':'disabled')}</div>
  <form data-form="leader-contact" class="form-grid">
  ${field('Your name','name','text',self?.name||'','required maxlength="120"')}
- ${field('Den / role','den','text',self?.den||'','placeholder="Webelos / Den Leader" maxlength="120"')}
+ ${select('Your den','den',denOptions,self?.den||'')}
  ${field('Phone','phone','tel',self?.phone||'','autocomplete="tel" maxlength="40"')}
  ${field('Email','email','email',self?.email||cloudState().user.email||'','required maxlength="254"')}
  <button class="btn" type="submit">Save my contact</button></form>
- <p class="meta">These are adult leader contacts, separate from the Scout roster. Your entry is visible only to approved Pack members. Email here is for contact, not sign-in authorization.</p>
- ${contacts.length?contacts.map(row=>`<div class="list-item row-between"><div><strong>${esc(row.name)}</strong><div class="meta">${esc(row.den||'No den or role entered')}</div><div class="meta">${esc(row.phone||'No phone')} · ${esc(row.email)}</div></div>${btn('Copy contact','leader-copy','btn btn-outline btn-small','data-id="'+esc(row.user_id)+'"')}</div>`).join(''):empty('📇','No leader contacts yet','Save your details to start the directory.')}
+ <p class="meta">Contact details are separate from Google sign-in and do not grant PackOps access.</p>
+ ${admin?`<div class="divider"></div><div class="row-between"><h3>${editing?'Edit leader card':'Add leader before onboarding'}</h3>${editing?btn('Cancel edit','leader-edit-cancel','btn btn-ghost btn-small'):''}</div>
+ <form data-form="admin-leader-card" data-id="${esc(editing?.id||'')}" class="stack"><div class="form-grid">
+ ${field('Name','name','text',editing?.name||'','required maxlength="120"')}
+ ${select('Den','den',denOptions,editing?.den||'')}
+ ${field('Phone','phone','tel',editing?.phone||'','maxlength="40"')}
+ ${field('Email','email','email',editing?.email||'','required maxlength="254"')}
+ </div><div class="field"><label>Pack roles</label><div class="recipient-list">${roles.map(role=>`<label class="recipient-choice"><input type="checkbox" name="role" value="${esc(role)}" ${editing?.roles?.includes(role)?'checked':''}><span>${esc(role)}</span></label>`).join('')}</div></div>
+ ${select('Link to an approved account (optional)','userId',[['','Not onboarded'],...ui.cloudMembers.filter(m=>m.status==='active').map(m=>[m.user_id,ui.leaderContacts.find(c=>c.user_id===m.user_id)?.name||m.user_id])],editing?.user_id||'')}
+ <p class="meta">Link only after verifying the person’s approved account. This does not approve a login or change their Pack role.</p>
+ <button class="btn" type="submit">${editing?'Save card':'Create contact card'}</button></form>`:''}
+ ${contacts.length?contacts.map(row=>`<div class="list-item row-between"><div><strong>${esc(row.name)}</strong><div class="meta">${esc([row.den,...(row.roles||[])].filter(Boolean).join(' · ')||'No den or role entered')}</div><div class="meta">${esc(row.phone||'No phone')} · ${esc(row.email)}</div><div class="meta">${row.user_id?'Linked to approved account':'Not linked to an account'}</div></div><div class="row wrap">${btn('Copy','leader-copy','btn btn-outline btn-small','data-id="'+esc(row.id)+'"')}${admin?btn('Edit','leader-edit','btn btn-ghost btn-small','data-id="'+esc(row.id)+'"'):''}</div></div>`).join(''):empty('📇','No leader contacts yet','Save or create a card to start the directory.')}
  </section>`;
 }
 function askDelete(message){return window.confirm(message)}
@@ -481,8 +566,27 @@ async function handleAction(action,trigger){
   case 'close-quick-menu':ui.quickMenu=false;render();return;
   case 'goto-contacts':route('contacts');return;
   case 'leader-copy':{
-   const row=ui.leaderContacts.find(x=>x.user_id===id);if(!row)throw Error('Leader contact not found');
+   const row=ui.leaderContacts.find(x=>x.id===id);if(!row)throw Error('Leader contact not found');
    await navigator.clipboard.writeText(leaderContactText(row));notify('Contact copied: name, den/role, phone, email');return;
+  }
+  case 'leader-edit':ui.editContactId=id;render();return;
+  case 'leader-edit-cancel':ui.editContactId='';render();return;
+  case 'dashboard-customize':ui.customizeDashboard=!ui.customizeDashboard;render();return;
+  case 'dashboard-reset':ui.hiddenCards=[];await persistUiPreferences();render();notify('Dashboard cards restored');return;
+  case 'resume-recent':{
+   const r=ui.recent;if(!r)throw Error('No recent workspace saved');
+   if(r.kind==='event'&&findEvent(r.id))route('events',r.id);
+   else if(r.kind==='den'&&dbState.denPlans.some(x=>x.id===r.id)){ui.denPlanId=r.id;route('den')}
+   else if(r.kind==='finance'&&isFinanceReviewer(cloudState().member?.role)){ui.financeTab=r.id||'overview';route('budget')}
+   else throw Error('That workspace is no longer available to your account');return;
+  }
+  case 'den-open-plan':ui.denPlanId=id;rememberRecent('den',id,dbState.denPlans.find(x=>x.id===id)?.title||'Den meeting');render();return;
+  case 'den-new-plan':ui.denPlanId='';render();return;
+  case 'discard-event-draft':{const form=root.querySelector('[data-form=event]');if(form)clearDraftForm(form);ui.form='';render();notify('Unfinished event draft discarded');return;}
+  case 'discard-den-draft':{const form=root.querySelector('[data-form=den-plan]');if(form)clearDraftForm(form);ui.denPlanId='';render();notify('Unfinished den edits discarded');return;}
+  case 'adventure-import':{
+   if(!ui.adventurePreview||ui.adventurePreview.errors.length)throw Error('Review the CSV issues first');
+   await saveAdventures(ui.adventurePreview.items);ui.adventurePreview=null;await refresh();notify('Adventure catalog imported for your authorized den');return;
   }
   case 'leaders-export':downloadCsv(leaderContactsCsv(ui.leaderContacts),'Pack179_LeaderContacts_'+isoToday()+'.csv');notify('Leader contact CSV exported');return;
   case 'transaction-open':ui.financeTab='transactions';route('budget');return;
@@ -573,7 +677,7 @@ async function handleAction(action,trigger){
    const receipt=dbState.receipts.find(r=>r.id===id),i=Number(trigger.dataset.index);
    if(receipt?.items?.[i]&&askDelete('Remove this locally itemized receipt line?')){await put('receipts',{...receipt,items:receipt.items.filter((_,j)=>i!==j)});await refresh()}return;
   }
-  case 'finance-tab':ui.financeTab=id;ui.financeForm='';ui.wizardStep=-1;render();return;
+  case 'finance-tab':ui.financeTab=id;ui.financeForm='';ui.wizardStep=-1;if(isFinanceReviewer(cloudState().member?.role))rememberRecent('finance',id,'Pack Finance');render();return;
   case 'finance-suggest-income':{
    const year=activeYear(),existingIds=new Set(dbState.financeTags.map(t=>t.id));
    const suggestions=dbState.financeLedger.filter(r=>scoutAccountYear(r)===year&&!existingIds.has(r.id))
@@ -731,7 +835,15 @@ async function handleAction(action,trigger){
   case 'equipment-edit':ui.editEquipment=id;ui.form='equipment';render();return;
   case 'equipment-cancel':ui.editEquipment='';ui.form='';render();return;
   case 'equipment-clear-search':ui.equipmentQuery='';render();return;
-  case 'equipment-export':{const rows=trigger.dataset.scope==='all'?queryEquipment(dbState.equipment,{sort:ui.equipmentSort}):queryEquipment(dbState.equipment,{search:ui.equipmentQuery,category:ui.equipmentCategory,sort:ui.equipmentSort});downloadCsv(equipmentCsv(rows),`Pack179_Equipment_${isoToday()}.csv`);notify(`Exported ${rows.length} equipment entries`);return;}
+  case 'equipment-attention':ui.equipmentAttention=id||'';render();return;
+  case 'equipment-open':ui.equipmentOpenId=ui.equipmentOpenId===id?'':id;render();return;
+  case 'equipment-verify':{
+   const row=dbState.equipment.find(x=>x.id===id);if(row){await put('equipment',{...row,condition:row.condition==='verify'?'ready':row.condition,verifiedAt:isoToday(),updatedAt:now()});await refresh();notify('Equipment verification saved to '+(cloudActive()?'the shared Pack workspace':'this device'))}return;
+  }
+  case 'equipment-return':{
+   const row=dbState.equipment.find(x=>x.id===id);if(row){await put('equipment',{...row,holder:'',updatedAt:now()});await refresh();notify('Equipment returned to '+(row.location||'unspecified storage'))}return;
+  }
+  case 'equipment-export':{const rows=trigger.dataset.scope==='all'?queryEquipment(dbState.equipment):queryEquipment(dbState.equipment,{search:ui.equipmentQuery,category:ui.equipmentCategory}).filter(r=>ui.equipmentAttention==='repair'?r.condition==='repair':ui.equipmentAttention==='verify'?r.condition==='verify'||!r.verifiedAt:ui.equipmentAttention==='held'?!!r.holder:ui.equipmentAttention==='missing'?!r.location:true);downloadCsv(equipmentCsv(rows),`Pack179_Equipment_${isoToday()}.csv`);notify(`Exported ${rows.length} equipment entries`);return;}
   case 'show-bookmark':ui.form='bookmark';render();return;
   case 'cancel-form':ui.form='';ui.editTask='';render();return;
   case 'calendar-plan':{
@@ -840,6 +952,15 @@ async function handleForm(form){
    await saveLeaderContact({name,den:f('den'),phone:f('phone'),email});
    await refresh();notify('Your contact details saved for approved leaders');return;
   }
+  case 'admin-leader-card':{
+   if(!['admin','cubmaster'].includes(cloudState().member?.role))throw Error('Only Pack administrators can edit cards');
+   const email=f('email').toLowerCase(),name=f('name');if(!name||!/^\S+@\S+\.\S+$/.test(email))throw Error('Enter a name and valid email');
+   const userId=f('userId');
+   if(userId&&!ui.cloudMembers.some(m=>m.user_id===userId&&m.status==='active'))throw Error('Choose an approved member account');
+   if(!form.dataset.id&&ui.leaderContacts.some(c=>c.email.toLowerCase()===email))throw Error('A card with this email exists; edit it instead');
+   await saveAdminContact({name,den:f('den'),phone:f('phone'),email,roles:new FormData(form).getAll('role'),user_id:userId||null},form.dataset.id);
+   ui.editContactId='';await refresh();notify('Leader card saved in the Pack directory');return;
+  }
   case 'transaction-submit':{
    const draft=transactionDraft({...Object.fromEntries(new FormData(form)),year:activeYear()});
    // Hold one submission ID through retries, including ambiguous network timeouts.
@@ -897,13 +1018,32 @@ async function handleForm(form){
   }
   case 'den-plan':{
    if(!ui.denChoice)throw Error('Choose a den first');
-   await put('denPlans',{id:makeId(),den:ui.denChoice,title:f('title'),date:f('date'),agenda:f('agenda'),supplies:f('supplies'),createdAt:now()});
+   const prior=dbState.denPlans.find(x=>x.id===form.dataset.id);
+   const eligible=new Set(groupScouts(dbState.roster).filter(x=>(x.denGroup||x.den)===ui.denChoice).map(x=>x.id));
+   const attendeeIds=new FormData(form).getAll('attendee').filter(x=>eligible.has(x));
+   const id=prior?.id||makeId();
+   await put('denPlans',{...prior,id,den:ui.denChoice,title:f('title'),date:f('date'),location:f('location'),agenda:f('agenda'),supplies:f('supplies'),attendeeIds,createdAt:prior?.createdAt||now(),updatedAt:now()});
+   clearDraftForm(form);
+   ui.denPlanId=id;rememberRecent('den',id,f('title'));
    await refresh();notify('Den meeting plan saved');return;
   }
   case 'den-progress':{
-   if(!ui.denChoice||!f('scoutId'))throw Error('Choose an assigned den and Scout first');
-   await put('adventureProgress',{id:makeId(),den:ui.denChoice,scoutId:f('scoutId'),adventure:f('adventure'),status:f('status'),createdAt:now()});
-   await refresh();notify('Internal advancement progress recorded (not posted to Scoutbook)');return;
+   const eligible=new Set(groupScouts(dbState.roster).filter(x=>(x.denGroup||x.den)===ui.denChoice).map(x=>x.id));
+   const scouts=[...new Set(new FormData(form).getAll('scoutId'))].filter(x=>eligible.has(x));
+   if(!ui.denChoice||!scouts.length)throw Error('Select at least one Scout in your den');
+   const adventure=f('adventure'),planId=f('planId');
+   if(planId&&!dbState.denPlans.some(x=>x.id===planId&&x.den===ui.denChoice))throw Error('Choose a saved meeting in your den');
+   for(const scoutId of scouts){
+    const old=dbState.adventureProgress.find(x=>x.den===ui.denChoice&&x.scoutId===scoutId&&x.adventure.toLowerCase()===adventure.toLowerCase()&&(x.planId||'')===planId);
+    await put('adventureProgress',{...old,id:old?.id||makeId(),den:ui.denChoice,scoutId,adventure,status:f('status'),planId,createdAt:old?.createdAt||now(),updatedAt:now()});
+   }
+   await refresh();notify('Internal adventure progress saved for '+scouts.length+' Scouts; Scoutbook is unchanged');return;
+  }
+  case 'adventure-csv':{
+   const file=form.elements.file.files?.[0];if(!file||file.size>512*1024)throw Error('Choose a CSV under 512 KB');
+   const allowed=cloudState().member?.role==='den_leader'?(cloudState().member.den_scopes||[]):DEN_NAMES;
+   ui.adventurePreview=parseAdventuresCsv(await file.text(),allowed);
+   render();notify(ui.adventurePreview.items.length+' adventure rows ready for review');return;
   }
   case 'drive-year-sources':{
    const year=activeYear(),credit=f('creditUrl'),ledger=f('ledgerUrl'),budgetUrl=f('budgetUrl'),receipts=f('receiptsUrl');
@@ -1036,7 +1176,7 @@ async function handleForm(form){
   }
   case 'event':{
    const e={id:makeId(),title:f('title'),date:f('date'),location:f('location'),owner:f('owner'),notes:f('notes'),links:f('links'),createdAt:now()};
-   await put('events',e);ui.form='';await refresh();route('events',e.id);notify('Event workspace saved on this device');return;
+   await put('events',e);clearDraftForm(form);ui.form='';await refresh();route('events',e.id);notify('Event workspace saved to '+(cloudActive()?'the shared Pack workspace':'this device')+'. Scoutbook is unchanged.');return;
   }
   case 'event-equipment':{
    const ev=findEvent(form.dataset.id),id=f('equipmentId');
@@ -1060,7 +1200,7 @@ async function handleForm(form){
    const qty=Number(f('quantity'));if(!Number.isInteger(qty)||qty<0||qty>999999)throw Error('Enter a valid whole-number quantity');
    if(!f('category'))throw Error('Category is required');
    const old=dbState.equipment.find(r=>r.id===form.dataset.editId);
-   await put('equipment',{...old,id:old?.id||makeId(),name:f('name'),category:f('category'),quantity:qty,location:f('location'),holder:f('holder'),condition:f('condition'),verifiedAt:f('verifiedAt'),notes:f('notes'),updatedAt:now()});
+   await put('equipment',{...old,id:old?.id||makeId(),name:f('name'),category:f('category'),quantity:qty,location:f('location'),holder:f('holder'),condition:f('condition'),verifiedAt:f('verifiedAt'),kitContents:f('kitContents'),notes:f('notes'),updatedAt:now()});
    ui.editEquipment='';break;
   }
   case 'bookmark':if(!safeUrl(f('url')))throw Error('Enter a valid HTTP(S) link');await put('bookmarks',{id:makeId(),label:f('label'),url:f('url'),description:f('description')});break;
@@ -1102,7 +1242,7 @@ root.addEventListener('submit',async event=>{
  try{await handleForm(form)}catch(error){console.error(error);notify(String(error?.message||error),true)}finally{if(button?.isConnected)button.disabled=false}
 });
 root.addEventListener('change',async event=>{
- const target=event.target;
+ const target=event.target;if(target.form)saveDraftForm(target.form);
  if(target.matches('input[type=file]')){ui.pickerOpen=false;const status=target.form?.querySelector('[data-file-status]');if(status)status.textContent=target.files?.[0]?target.files[0].name+' — ready to attach':'No file selected';if(target.form)target.form.dataset.dirty='true';return;}
  if(target.dataset.change==='den-choice'){ui.denChoice=target.value;render();return}
  if(target.dataset.change==='finance-account-den'){ui.accountDen=target.value;render();return}
@@ -1125,6 +1265,11 @@ root.addEventListener('change',async event=>{
   return;
  }
  if(target.dataset.change==='equipment-filter'){ui.equipmentCategory=target.value;render();return}
+ if(target.dataset.change==='dashboard-card'){
+  ui.hiddenCards=target.checked?ui.hiddenCards.filter(id=>id!==target.value):[...new Set([...ui.hiddenCards,target.value])];
+  await persistUiPreferences();render();return;
+ }
+ if(target.dataset.change==='equipment-group'){ui.equipmentGroup=target.value;render();return}
  if(target.dataset.change==='equipment-sort'){ui.equipmentSort=target.value;render();return}
  if(target.dataset.change==='roster-den'){ui.rosterDen=target.value;render();return}
  if(target.dataset.change==='roster-rank'){ui.rosterRank=target.value;render();return}
@@ -1135,7 +1280,7 @@ root.addEventListener('change',async event=>{
  }
 });
 root.addEventListener('input',event=>{
- if(event.target.form)event.target.form.dataset.dirty='true';
+ if(event.target.form){event.target.form.dataset.dirty='true';saveDraftForm(event.target.form)}
  if(event.target.name==='family-search'){
   const val=event.target.value,pos=event.target.selectionStart;ui.familySearch=val;render();const el=root.querySelector('[name="family-search"]');if(el){el.focus();if(pos!==null)el.setSelectionRange(pos,pos)}return;
  }

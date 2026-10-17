@@ -4,11 +4,11 @@ const norm=s=>String(s??'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toL
 export const normalizeEquipment=r=>({
  ...r,name:String(r.name||'').trim(),category:String(r.category||'General Equipment').trim()||'General Equipment',
  quantity:Number.isInteger(Number(r.quantity))&&Number(r.quantity)>=0?Number(r.quantity):1,
- location:String(r.location||''),holder:String(r.holder||''),condition:r.condition||'verify',verifiedAt:r.verifiedAt||'',notes:String(r.notes||'')
+ location:String(r.location||''),holder:String(r.holder||''),condition:r.condition||'verify',verifiedAt:r.verifiedAt||'',kitContents:String(r.kitContents||''),notes:String(r.notes||'')
 });
 function score(row,terms){
  const r=normalizeEquipment(row);
- const fields=[r.name,r.category,r.location,r.holder,r.notes].map(norm);
+ const fields=[r.name,r.category,r.location,r.holder,r.kitContents,r.notes].map(norm);
  const text=fields.join(' ');
  let total=0;
  for(const term of terms){
@@ -37,6 +37,6 @@ export const csvCell=x=>{
  return '"'+text.replaceAll('"','""')+'"';
 };
 export function equipmentCsv(rows){
- const columns=[['name','Name'],['category','Category'],['quantity','Quantity'],['location','Storage location'],['holder','Current holder'],['condition','Condition'],['verifiedAt','Last verified'],['notes','Notes']];
+ const columns=[['name','Name'],['category','Category'],['quantity','Quantity'],['location','Storage location'],['holder','Current holder'],['condition','Condition'],['verifiedAt','Last verified'],['kitContents','Kit contents'],['notes','Notes']];
  return [columns.map(([,name])=>csvCell(name)).join(','),...rows.map(r=>columns.map(([key])=>csvCell(normalizeEquipment(r)[key])).join(','))].join('\r\n');
 }
