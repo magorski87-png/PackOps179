@@ -26,6 +26,8 @@ import {cloudSettingsPanel} from './cloud-panel.js';
 import {familyManagerView,denWorkspaceView,familyPublicPanel} from './workspace-v06-ui.js';
 import {familyResponseCsv} from './family-ui.js';
 import {reconcileRoster} from './roster-sync.js';
+import {leaderContactText,leaderContactsCsv,contactSort} from './leader-contacts.js';
+import {fetchLeaderContacts,saveLeaderContact,fetchRoleNames,saveRoleName} from './cloud.js';
 
 const root=document.getElementById('root');
 const PACK_CALENDAR_ID='d274340b6d3d99f84d54263204b8b3b6d76c6cddc609015905749069a5dc3740@group.calendar.google.com';
@@ -33,6 +35,7 @@ let pwaInstallPrompt=null;
 const dbState=Object.fromEntries(TABLES.map(t=>[t,t==='settings'?[]:[]]));
 const ui={workflow:{available:false,requests:[],audit:[],notifications:[]},pickerOpen:false,budgetEditId:'',familyPreview:null,familySending:false,page:'home',eventId:'',form:'',editTask:'',meetingMode:'quick',editMeeting:false,rosterFilter:'',rosterDen:'all',rosterRank:'all',rosterSort:'name',rosterReview:false,rosterSelected:new Set(),calendars:[],googleEvents:[],calendarFetchedAt:0,toastId:0,financeTab:'overview',financeForm:'',wizardStep:-1,wizardSource:'template',wizardConfig:null,wizardExpenses:[],reimbursementEventId:'',receiptEventId:'',receiptItemsId:'',accountQuery:'',accountDen:'all',accountSort:'name',equipmentQuery:'',equipmentCategory:'all',equipmentSort:'name-asc',equipmentExport:'filtered',editEquipment:'',cloudError:'',cloudMembers:[],cloudInvites:[],familyForms:[],familyActive:'',familyResults:null,familySearch:'',familyLink:'',familyData:null,familySent:false,denChoice:''};
 const now=()=>Date.now();
+Object.assign(ui,{quickMenu:false,leaderContacts:[],roleNames:{}});
 const cloudActive=()=>Boolean(cloudState().member);
 async function writeSetting(key,value){
  const isShared=key==='activeScoutYear'||key.startsWith('finance');
@@ -151,9 +154,10 @@ async function refresh(background=false){
   dbState.settings=[...byKey.values()];
  }
  if(cloudActive()){
+  [ui.leaderContacts,ui.roleNames]=await Promise.all([fetchLeaderContacts(),fetchRoleNames()]);
   try{ui.workflow=await loadTransactionWorkflow()}catch(e){ui.workflow={available:false,requests:[],audit:[],notifications:[],error:e.message}}
   const combined=combinedLedger(dbState.financeLedger,dbState.financeTags,ui.workflow.requests);dbState.financeLedger=combined.ledger;dbState.financeTags=combined.tags;
- }else ui.workflow={available:false,requests:[],audit:[],notifications:[]};
+ }else {ui.leaderContacts=[];ui.roleNames={};ui.workflow={available:false,requests:[],audit:[],notifications:[]};}
  if(background&&hasPendingForm(root,ui.pickerOpen)){ui.cloudChanged=true;return}
  render();
 }
@@ -172,12 +176,13 @@ async function persistGoogleConfiguration(config){
  if(config.apiKey!==settings('googleApiKey'))await writeSetting('googleApiKey',config.apiKey);
 }
 function route(view='home',event=''){
- ui.page=view;ui.eventId=event;ui.form='';ui.editTask='';
+ ui.page=view;ui.eventId=event;ui.form='';ui.editTask='';ui.quickMenu=false;
  const hash='#'+view+(event?'/'+encodeURIComponent(event):'');
  if(location.hash!==hash)location.hash=hash;
  render();window.scrollTo({top:0,behavior:'instant'});
 }
 function restoreRoute(){
+ ui.quickMenu=false;
  const segments=location.hash.slice(1).split('/');
  ui.page=['home',...MENU.map(m=>m.id),'settings','family'].includes(segments[0])?segments[0]:'home';
  ui.eventId=segments[1]?decodeURIComponent(segments[1]):'';
@@ -197,7 +202,8 @@ function render(){
   <nav class="nav-list" aria-label="Main navigation"><button class="nav-link${ui.page==='home'?' active':''}" data-nav="home"><span class="emoji">🏡</span> Dashboard</button><div class="nav-label">Your tools</div>
   ${MENU.map(m=>`<button class="nav-link${ui.page===m.id?' active':''}" data-nav="${m.id}"><span class="emoji">${m.emoji}</span>${esc(m.label)}</button>`).join('')}</nav>
   <div class="sidebar-footer"><small>Pack 179 · Built for the people making Scouting happen.<br>Records sync only after approved Google sign-in and backend setup.</small><button data-nav="settings">⚙ &nbsp; Settings & Drive</button></div></aside>
-  <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-nav="home" aria-label="Dashboard">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">${cloudActive()?('● Shared Pack workspace'+(ui.cloudChanged?' · Refresh recommended':'')):'● Local / setup mode'}</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
+  <main class="main"><header class="topbar"><div class="topbar-title"><button class="mobile-menu" data-action="toggle-quick-menu" aria-label="Open quick access menu" aria-expanded="${ui.quickMenu}" aria-controls="quick-access">☷</button><span>✦</span><strong>${active?esc(active.label):ui.page==='settings'?'Settings & Drive':'Pack 179 Leadership'}</strong></div><div class="topbar-right"><span class="pwa-hint">${cloudActive()?('● Shared Pack workspace'+(ui.cloudChanged?' · Refresh recommended':'')):'● Local / setup mode'}</span>${!window.matchMedia('(display-mode: standalone)').matches?btn('⬇ Install','install-pwa','btn btn-ghost btn-small no-print'):''}${btn('⚙ Settings','goto-settings','btn btn-ghost btn-small no-print')}<div class="avatar">179</div></div></header>
+  ${ui.quickMenu?'<div class="quick-menu-backdrop" data-action="close-quick-menu"></div><nav id="quick-access" class="quick-menu no-print" aria-label="Quick access"><strong>Jump to</strong><button data-nav="home">🏡 Home</button>'+MENU.map(m=>'<button data-nav="'+m.id+'">'+m.emoji+' '+esc(m.label)+'</button>').join('')+'<button data-nav="settings">⚙ Settings</button></nav>':''}
   <div class="content">${ui.workflow.notifications.some(n=>!n.seen_at)?`<div class="note">New transaction submissions need review. ${btn('Open approvals','transaction-open','btn btn-small')}</div>`:''}${view()}</div></main>
   <nav class="mobile-bottom no-print" aria-label="Mobile navigation">${[{id:'home',emoji:'🏡',name:'Home'},{id:'calendar',emoji:'🗓️',name:'Calendar'},{id:'budget',emoji:'📊',name:'Finance'},{id:'receipts',emoji:'🧾',name:'Receipts'},{id:'events',emoji:'✅',name:'Events'}].map(t=>`<button class="mobile-tab${ui.page===t.id?' active':''}" data-nav="${t.id}"><span class="emoji">${t.emoji}</span>${t.name}</button>`).join('')}</nav>
  </div>`;
@@ -206,7 +212,7 @@ function view(){
  if(ui.page==='family')return familyPublicPage();
  if(cloudConfigured()&&!cloudActive()&&ui.page!=='settings')return `${intro('Private Pack workspace','Google sign-in required','This Pack uses a secure shared backend. Sign in with an approved leader account before viewing rosters, financial records, or event workspaces.')}${btn('Open security settings','goto-settings','btn')}`;
  switch(ui.page){
- case 'families':return families();case 'den':return denWorkspace();case 'home':return home();case 'calendar':return calendar();case 'budget':return budget();case 'receipts':return receipts();case 'meeting':return meeting();case 'volunteers':return volunteers();case 'events':return events();case 'roster':return roster();case 'equipment':return equipment();case 'assistant':return assistant();case 'library':return library();case 'settings':return settingsPage();default:return home();}}
+ case 'contacts':return leaderDirectory();case 'families':return families();case 'den':return denWorkspace();case 'home':return home();case 'calendar':return calendar();case 'budget':return budget();case 'receipts':return receipts();case 'meeting':return meeting();case 'volunteers':return volunteers();case 'events':return events();case 'roster':return roster();case 'equipment':return equipment();case 'assistant':return assistant();case 'library':return library();case 'settings':return settingsPage();default:return home();}}
 function home(){
  const s=summary(dbState.tasks);const next=upcomingRecords()[0];
  return `<section class="hero"><div class="hero-copy"><span class="eyebrow" style="color:#eed69e">WELCOME TO PACKOPS</span><h2>Less organizing. More Scouting.</h2><p>Your Pack calendar, event planning, meeting guides, records and tools—all in one place, without replacing Scoutbook Plus.</p><div class="hero-action">${btn('✨ Review priorities','goto-assistant','btn btn-gold')}</div></div><div class="hero-symbol">⚜️</div></section>
@@ -320,6 +326,7 @@ function roster(){
  const ranks=[...new Set(scouts.map(r=>r.rank||'Unspecified'))].sort();
  const selected=ui.rosterSelected.size,visibleSelected=rows.filter(r=>ui.rosterSelected.has(r.id)).length;
  return `${intro('Private leadership reference','Pack Roster','Filter by exact den or rank, sort Scout records, and export only the selected fields and Scouts.',link(LINKS.scoutbook,'Official Scoutbook roster'))}
+ ${btn('Leader contacts','goto-contacts','btn btn-outline')}
  ${note('<strong>Private roster:</strong> Copies remain in this device’s browser storage. No server-side access control exists in v0.2. Do not use this on shared devices; never commit Scout CSVs or exported contact lists to GitHub.',true)}
  <section class="panel stack"><div class="row-between"><h2>Import & review</h2><span class="pill">${scouts.length} unique Scouts · ${dbState.roster.length} source rows</span></div><p>Supports the October 10 Scoutbook export: den labels such as “Webelos 2,” “Wolf 6” and “1” stay exactly as exported. Den/rank disagreements and ambiguous den numbers are flagged for review, not silently corrected.</p>
  <form data-form="roster" class="row wrap"><div class="field" style="flex:1;min-width:240px"><label for="roster-file">Scoutbook roster (.csv)</label><input class="input" type="file" id="roster-file" name="file" accept=".csv,text/csv,text/plain" required></div><button class="btn" type="submit">Preview CSV issues</button>${dbState.roster.length?btn('Clear local roster','clear-roster','btn btn-danger'):''}</form>
@@ -382,7 +389,7 @@ function denWorkspace(){
  const allowed=role?.role==='den_leader'?(role.den_scopes||[]):DEN_NAMES;
  const selected=allowed.includes(ui.denChoice)?ui.denChoice:allowed[0]||'';
  ui.denChoice=selected;
- return denWorkspaceView({state:dbState,den:selected,allowed,esc,btn,field,select,textarea,intro,note});
+ return denWorkspaceView({state:dbState,den:selected,allowed,esc,btn,field,select,textarea,intro,note})+leaderDirectory(true);
 }
 function assistant(){
  const s=summary(dbState.tasks);const issue=[...s.overdue,...s.unassigned.filter(x=>!s.overdue.includes(x)),...s.dueSoon.filter(x=>!s.overdue.includes(x)&&!s.unassigned.includes(x))].slice(0,12);
@@ -402,6 +409,7 @@ function settingsPage(){
  const panel=cloudSettingsPanel({state:cloudState(),configured:cloudSettings(),setupError:ui.cloudError,members:ui.cloudMembers,invites:ui.cloudInvites,esc,btn,field,select,note});
  if(cloudConfigured()&&!cloudActive())return `${intro('Private Pack data','Security & Google login','Sign in with an approved Pack Google account to access PackOps.')}${panel}`;
  return `${panel}${intro('Your device and Drive','Settings','Local privacy controls and optional, user-authorized Google Drive receipt uploads.')}
+ ${roleNameSettings()}
  <div class="split"><section class="panel stack"><h2>Connect Google services</h2><p>For receipt uploads, enable Drive API and Picker API. For upcoming events, enable Google Calendar API and grant calendar.readonly access. Use a Google OAuth Web Client ID authorized for your PackOps website. Tokens stay in memory; never enter client secrets.</p><p>Calendar connection status: <strong>${calendarConnected()?'Authorized for this session':'Not connected'}</strong>. Open Pack Calendar to select a calendar.</p>
  <form data-form="google-settings" class="stack">${field('Google OAuth web client ID','googleClientId','text',settings('googleClientId'),'placeholder="12345-abcdef.apps.googleusercontent.com" autocomplete="off"')}${field('Google Picker API key','googleApiKey','text',settings('googleApiKey'),'placeholder="AIza..." autocomplete="off"')}<button class="btn" type="submit">Save configuration on this device</button></form>
  <p class="meta">OAuth Client ID: <strong>${settings('googleClientId')?'Saved on this device':'NOT SAVED'}</strong> · Picker API key: <strong>${settings('googleApiKey')?'Saved on this device':'Not saved'}</strong></p>
@@ -410,7 +418,7 @@ function settingsPage(){
  <div class="privacy-strip">You must explicitly authorize the app and select the proper destination folder. The Drive API only uploads receipts when you click Upload. There is no background access to roster files or finances.</div></section>
  <section class="panel stack"><h2>Data & privacy</h2><p>This version saves event plans, roster copies, budgets, Scout credit snapshots, reimbursement proposals, volunteer tasks, and receipts in this browser's IndexedDB. Clearing browser storage removes local data. Different devices do not yet synchronize these records.</p><p>Never import private youth records onto shared or public devices. This version has no server-based role permissions.</p>${btn('Clear all local working data','clear-local','btn btn-danger btn-full')}${link(LINKS.packDrive,'Open authorized Pack Drive','btn btn-outline btn-full')}</section></div>
  <section class="panel stack" style="margin-top:20px"><h2>Scout year & Pack dues</h2>
- <p>Configure annual dues separately for every Scout year. Updating dues changes local forecasts and discrepancy checks, but NEVER rewrites Courtney's official Google Sheets formulas or financial records.</p>
+ <p>Configure annual dues separately for every Scout year. Updating dues changes local forecasts and discrepancy checks, but NEVER rewrites the Treasurer's official Google Sheets formulas or financial records.</p>
  <form data-form="pack-year-config" class="form-grid">
  ${field('Scout year (e.g. 2026-27)','year','text',activeYear(),'pattern="20[0-9]{2}-[0-9]{2}" required')}
  ${field('Annual Pack dues per Scout ($)','dues','number',annualDues()===null?'':String(annualDues()),'step="0.01" min="0" max="10000" required')}
@@ -441,10 +449,42 @@ function settingsPage(){
  <button class="btn btn-outline" type="submit">Review and restore</button></form></section>`;
 }
 
+function roleNameSettings(){
+ if(!cloudActive())return '';
+ const editable=['admin','cubmaster'].includes(cloudState().member.role);
+ return `<section class="panel stack" style="margin:20px 0"><h2>Pack role names</h2><p>Use names on PackOps labels and review messages. Changing a name does not grant access; use Security & Google login for permissions.</p>
+ ${editable?`<form data-form="role-names" class="form-grid">${[['treasurer','Treasurer'],['cubmaster','Cubmaster'],['activities_director','Activities Director']].map(([key,label])=>field(label,key,'text',ui.roleNames[key]||'','maxlength="120"')).join('')}<button class="btn" type="submit">Save names for the Pack</button></form>`:
+ `<p>Treasurer: ${esc(ui.roleNames.treasurer||'Not set')} · Cubmaster: ${esc(ui.roleNames.cubmaster||'Not set')} · Activities Director: ${esc(ui.roleNames.activities_director||'Not set')}</p>`}
+ </section>`;
+}
+function leaderDirectory(compact=false){
+ if(!cloudActive())return '';
+ const self=ui.leaderContacts.find(x=>x.user_id===cloudState().user.id);
+ const contacts=ui.leaderContacts.slice().sort(contactSort);
+ return `${compact?'<section class="panel stack" style="margin-top:20px">':intro('Pack leadership','Leader contacts','Each approved leader fills in their own contact details. All approved Pack members can copy a contact or export the directory.')+'<section class="panel stack">'}
+ <div class="row-between"><h2>${compact?'Your contact details & directory':'Leader directory'}</h2>${btn('Export leaders (.csv)','leaders-export','btn btn-outline btn-small',contacts.length?'':'disabled')}</div>
+ <form data-form="leader-contact" class="form-grid">
+ ${field('Your name','name','text',self?.name||'','required maxlength="120"')}
+ ${field('Den / role','den','text',self?.den||'','placeholder="Webelos / Den Leader" maxlength="120"')}
+ ${field('Phone','phone','tel',self?.phone||'','autocomplete="tel" maxlength="40"')}
+ ${field('Email','email','email',self?.email||cloudState().user.email||'','required maxlength="254"')}
+ <button class="btn" type="submit">Save my contact</button></form>
+ <p class="meta">These are adult leader contacts, separate from the Scout roster. Your entry is visible only to approved Pack members. Email here is for contact, not sign-in authorization.</p>
+ ${contacts.length?contacts.map(row=>`<div class="list-item row-between"><div><strong>${esc(row.name)}</strong><div class="meta">${esc(row.den||'No den or role entered')}</div><div class="meta">${esc(row.phone||'No phone')} · ${esc(row.email)}</div></div>${btn('Copy contact','leader-copy','btn btn-outline btn-small','data-id="'+esc(row.user_id)+'"')}</div>`).join(''):empty('📇','No leader contacts yet','Save your details to start the directory.')}
+ </section>`;
+}
 function askDelete(message){return window.confirm(message)}
 async function handleAction(action,trigger){
  const id=trigger.dataset.id;
  switch(action){
+  case 'toggle-quick-menu':ui.quickMenu=!ui.quickMenu;render();return;
+  case 'close-quick-menu':ui.quickMenu=false;render();return;
+  case 'goto-contacts':route('contacts');return;
+  case 'leader-copy':{
+   const row=ui.leaderContacts.find(x=>x.user_id===id);if(!row)throw Error('Leader contact not found');
+   await navigator.clipboard.writeText(leaderContactText(row));notify('Contact copied: name, den/role, phone, email');return;
+  }
+  case 'leaders-export':downloadCsv(leaderContactsCsv(ui.leaderContacts),'Pack179_LeaderContacts_'+isoToday()+'.csv');notify('Leader contact CSV exported');return;
   case 'transaction-open':ui.financeTab='transactions';route('budget');return;
   case 'transaction-refresh':await refresh();return;
   case 'transaction-read':await markTransactionNotificationsRead();await refresh();return;
@@ -789,6 +829,17 @@ function openBlob(blob){const url=URL.createObjectURL(blob);const opened=window.
 async function handleForm(form){
  const kind=form.dataset.form;const f=k=>formData(form,k);
  switch(kind){
+  case 'role-names':{
+   if(!cloudActive())throw Error('Sign in first');
+   for(const key of ['treasurer','cubmaster','activities_director'])await saveRoleName(key,f(key));
+   await refresh();notify('Pack role names updated');return;
+  }
+  case 'leader-contact':{
+   if(!cloudActive())throw Error('Sign in first');
+   const name=f('name'),email=f('email');if(!name||!/^\S+@\S+\.\S+$/.test(email))throw Error('Enter a name and valid email');
+   await saveLeaderContact({name,den:f('den'),phone:f('phone'),email});
+   await refresh();notify('Your contact details saved for approved leaders');return;
+  }
   case 'transaction-submit':{
    const draft=transactionDraft({...Object.fromEntries(new FormData(form)),year:activeYear()});
    // Hold one submission ID through retries, including ambiguous network timeouts.
@@ -931,7 +982,7 @@ async function handleForm(form){
    const acc=dbState.financeAccounts.find(x=>x.id===f('accountId'));
    if(!acc)throw Error('Select an imported Scout account first');
    const delta=Number(f('delta'));if(!Number.isFinite(delta)||delta===0||Math.abs(delta)>1e6)throw Error('Enter a valid nonzero adjustment amount');
-   if(!f('reason'))throw Error('Enter a reason that Courtney can review');
+   if(!f('reason'))throw Error('Enter a reason that '+(ui.roleNames.treasurer||'the Treasurer')+' can review');
    await put('financeAdjustments',{id:makeId(),accountId:acc.id,delta:Math.round(delta*100)/100,date:f('date'),reason:f('reason'),status:'proposed',createdAt:now()});break;
   }
   case 'finance-reimbursement':{
@@ -1044,6 +1095,7 @@ root.addEventListener('click',async event=>{
  const action=event.target.closest('[data-action]');if(!action)return;
  try{await handleAction(action.dataset.action,action)}catch(error){console.error(error);notify(String(error?.message||error),true)}
 });
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&ui.quickMenu){ui.quickMenu=false;render();}});
 root.addEventListener('submit',async event=>{
  const form=event.target.closest('[data-form]');if(!form)return;
  event.preventDefault();const button=form.querySelector('[type=submit]');if(button)button.disabled=true;

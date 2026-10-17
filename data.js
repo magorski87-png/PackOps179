@@ -21,6 +21,7 @@ export const MENU=[
   {id:'volunteers',label:'Volunteers',sub:'Jobs & responsibilities',emoji:'🤝',tone:'lilac'},
   {id:'events',label:'Event Status',sub:'Notes, tasks & files',emoji:'✅',tone:'mint'},
   {id:'roster',label:'Pack Roster',sub:'Authorized contacts',emoji:'📒',tone:'blue'},
+  {id:'contacts',label:'Leader Contacts',sub:'Copy and export adult contacts',emoji:'📇',tone:'blue'},
   {id:'equipment',label:'Equipment',sub:'Where everything lives',emoji:'🎒',tone:'amber'},
   {id:'den',label:'Den Leader',sub:'Meetings & adventures',emoji:'🧭',tone:'sky'},
   {id:'families',label:'Family RSVPs',sub:'Polls & signups',emoji:'📨',tone:'gold'},

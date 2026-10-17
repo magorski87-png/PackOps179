@@ -90,6 +90,12 @@ body{background:#F4F7FC}
 .nav-link:hover:not(.active){background:#1A589C;color:#fff}
 .sidebar-footer button{border-color:#91B4E3;color:#fff}
 .sidebar-footer button:hover{background:#174C8A}
+.quick-menu-backdrop{position:fixed;inset:0;background:#08244780;z-index:35}
+.quick-menu{position:fixed;z-index:36;top:72px;left:12px;width:min(330px,calc(100vw - 24px));max-height:calc(100dvh - 165px);overflow-y:auto;background:#fff;border:1px solid var(--cub-border);border-radius:16px;box-shadow:0 18px 50px #001b4055;padding:12px;display:grid;gap:3px}
+.quick-menu strong{padding:9px 12px;color:var(--cub-ink)}
+.quick-menu button{border:0;border-radius:8px;background:#fff;text-align:left;padding:11px 12px;color:var(--cub-ink);font-weight:700}
+.quick-menu button:hover,.quick-menu button:focus-visible{background:var(--cub-pale)}
+.mobile-menu[aria-expanded=true]{background:var(--cub-yellow);color:var(--cub-deep)}
 .topbar{background:#fff;border-bottom:2px solid var(--cub-yellow)}
 .topbar-title,.topbar-title strong,.page-head h1,.section-head h2,.panel h2,.panel h3,.event-card h3,.task-title,.stat strong,.finance-kpi strong,.tool-card strong,.event-preview-row strong,.number-big{color:var(--cub-ink)}
 .avatar{background:var(--cub-yellow);color:var(--cub-deep)}

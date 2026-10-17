@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {csvParse,summary,completion,brief,MEETING,MENU} from '../data.js';
 import {parseRoster} from '../roster-import.js';
 
-test('dashboard retains core ten sections plus Den Leader and family response tools',()=>{
- assert.equal(MENU.length,12);assert.equal(new Set(MENU.map(x=>x.id)).size,12);
+test('dashboard includes leader contacts alongside Den Leader and family response tools',()=>{
+ assert.equal(MENU.length,13);assert.equal(new Set(MENU.map(x=>x.id)).size,13);
+ assert.ok(MENU.some(x=>x.id==='contacts'));
 });
 test('meeting script includes essential elements',()=>{
  for(const component of ['flags-open','pledge','recognition','activity','announcements','minute','flags-close'])assert.ok(MEETING.some(x=>x.id===component));
