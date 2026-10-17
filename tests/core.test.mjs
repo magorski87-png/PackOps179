@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {csvParse,summary,completion,brief,MEETING,MENU} from '../data.js';
-import {parseRoster} from '../roster-import.js';
+import {parseRoster,cleanDenName} from '../roster-import.js';
 
 test('dashboard includes leader contacts alongside Den Leader and family response tools',()=>{
  assert.equal(MENU.length,13);assert.equal(new Set(MENU.map(x=>x.id)).size,13);
@@ -23,6 +23,14 @@ test('roster import finds header after report title and flags issues',()=>{
 });
 test('roster invalid header gives human-readable error',()=>{
  assert.throws(()=>parseRoster('Name,Age\nSomeone,10'),/First Name/);
+});
+test('roster import removes trailing den numbers without guessing number-only dens',()=>{
+ const csv='First Name,Last Name,Parent Guardian Name,Email,Den,Rank\nAlex,Scout,Pat,pat@example.com,Webelos 2,Webelos\nRiley,Scout,Sam,sam@example.com,1,NO RANK\nTaylor,Scout,Kim,kim@example.com,Arrow of Light 1,Arrow of Light';
+ const rows=parseRoster(csv).records;
+ assert.deepEqual(rows.map(r=>r.den),['Webelos','1','Arrow of Light']);
+ assert.deepEqual(rows.map(r=>r.denGroup),['Webelos','Needs review','Arrow of Light']);
+ assert.equal(cleanDenName('Tiger 5'),'Tiger');
+ assert.equal(cleanDenName('Den 5'),'Den 5');
 });
 test('task summary distinguishes overdue, due soon, and missing owner',()=>{
  const s=summary([{status:'open',due:'2026-10-01',owner:'',priority:'high'},{status:'done',due:'2026-10-10',owner:'Helper'},{status:'open',due:'2026-10-14',owner:'Helper'}],'2026-10-10');

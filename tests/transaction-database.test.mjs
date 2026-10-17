@@ -41,6 +41,15 @@ test('Postgres enforces transaction roles, lifecycle, audit and duplicate preven
   const addCard=(linked=null)=>db.query('insert into public.leader_contact_cards(pack_id,user_id,name,email) values($1,$2,$3,$4)',[pack,linked,'Committee Chair','chair@example.test']);
   await assert.rejects(addCard(),/row-level security/);
   await as('admin');await addCard();
+  const oldRoster={id:'scout-den-test',name:'Example Scout',den:'Webelos 2',denGroup:'Webelos',rank:'Bear'};
+  await db.query("insert into public.pack_records(pack_id,table_name,record_id,payload) values($1,'roster',$2,$3)",[pack,oldRoster.id,oldRoster]);
+  await db.exec('reset role');
+  await db.exec(await readFile(new URL('../supabase/migrations/202610170003_normalize_roster_den_suffixes.sql',import.meta.url),'utf8'));
+  const normalized=(await db.query("select den_scope,payload->>'den' den,payload->>'sourceDen' source_den from public.pack_records where table_name='roster'")).rows[0];
+  assert.deepEqual(normalized,{den_scope:'Webelos',den:'Webelos',source_den:'Webelos 2'});
+  await as('den_leader');
+  assert.equal((await db.query("select count(*)::int n from public.pack_records where table_name='roster'")).rows[0].n,1);
+  await as('admin');
   await db.query('insert into public.adventure_catalog(pack_id,den,title) values($1,$2,$3)',[pack,'Lion','Lion Adventure']);
   await as('den_leader');assert.equal((await db.query('select * from public.leader_contact_cards')).rows.length,1);
   assert.equal((await db.query('select * from public.adventure_catalog')).rows.length,0);

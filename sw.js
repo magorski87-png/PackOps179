@@ -1,4 +1,4 @@
-const CACHE='packops-shell-v22';
+const CACHE='packops-shell-v23';
 const ROOT=self.registration.scope;
 const FILES=['','index.html','styles.css','app.js','leader-contacts.js','adventures.js','adventure-example.csv','release-info.js','db.js','data.js','drive.js','roster-import.js','calendar-api.js','calendar-import.js','finance.js','finance-ui.js','finance-google.js','finance-template.js','pack-config.js','backup.js','settings-actions.js','event-sync.js','budget-wizard.js','budget-wizard-ui.js','finance-insights.js','google-config.js','equipment-utils.js','roster-sync.js','finance-editing.js','family-invitations.js','attachments.js','transaction-workflow.js','transaction-ui.js','cloud-config.js','cloud-config-validation.js','cloud.js','cloud-panel.js','family-ui.js','workspace-v06-ui.js','manifest.webmanifest','icon.svg','icon-192.png','icon-512.png'];
 self.addEventListener('install',event=>{
