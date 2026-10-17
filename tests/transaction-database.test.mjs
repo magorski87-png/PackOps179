@@ -29,6 +29,15 @@ test('Postgres enforces transaction roles, lifecycle, audit and duplicate preven
  const submit=(id=request,p=pack)=>db.query('select * from public.pack_submit_transaction($1,$2,$3)',[p,id,data]);
  const review=(id,version,action,note='')=>db.query('select * from public.pack_review_transaction($1,$2,$3,$4,$5)',[pack,id,version,action,note]);
  try{
+  const contact=(owner=ids.den_leader,p=pack)=>db.query('insert into public.leader_contacts(pack_id,user_id,name,den,email) values($1,$2,$3,$4,$5)',[p,owner,'Den Leader','Webelos','leader@example.test']);
+  await as('outsider');await assert.rejects(contact(),/row-level security/);
+  await as('den_leader');await assert.rejects(contact(ids.treasurer),/row-level security/);await contact();
+  await assert.rejects(()=>db.query('insert into public.pack_role_names(pack_id,role_key,display_name) values($1,$2,$3)',[pack,'treasurer','Example']),/row-level security/);
+  await as('admin');await db.query('insert into public.pack_role_names(pack_id,role_key,display_name) values($1,$2,$3)',[pack,'treasurer','Example']);
+  await as('volunteer');assert.equal((await db.query('select name from public.leader_contacts')).rows.length,1);
+  assert.equal((await db.query('select display_name from public.pack_role_names')).rows[0].display_name,'Example');
+  await as('outsider');assert.equal((await db.query('select * from public.leader_contacts')).rows.length,0);
+  assert.equal((await db.query('select * from public.pack_role_names')).rows.length,0);
   await as('outsider');await assert.rejects(submit,/membership/);
   await as('den_leader');await submit();await submit();
   assert.equal((await db.query('select count(*)::int n from public.finance_requests')).rows[0].n,1);

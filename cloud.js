@@ -76,6 +76,19 @@ export async function migrateLocalRecords(localData){
  return totals;
 }
 export async function listMembers(){requireMember();const res=await client.from('pack_members').select('user_id,role,den_scopes,status,created_at').eq('pack_id',packId);fail(res,'Leader access');return res.data||[]}
+export async function fetchLeaderContacts(){
+ requireMember();const res=await client.from('leader_contacts').select('user_id,name,den,phone,email').eq('pack_id',packId).order('name');fail(res,'Leader contacts');return res.data||[];
+}
+export async function saveLeaderContact(details){
+ requireMember();const res=await client.from('leader_contacts').upsert({pack_id:packId,user_id:user.id,...details},{onConflict:'pack_id,user_id'});fail(res,'Saving your contact');
+}
+export async function fetchRoleNames(){
+ requireMember();const res=await client.from('pack_role_names').select('role_key,display_name').eq('pack_id',packId);fail(res,'Pack role names');return Object.fromEntries((res.data||[]).map(r=>[r.role_key,r.display_name]));
+}
+export async function saveRoleName(roleKey,displayName){
+ requireMember();if(!['admin','cubmaster'].includes(member.role))throw Error('Only Pack administrators can edit role names');
+ const res=await client.from('pack_role_names').upsert({pack_id:packId,role_key:roleKey,display_name:displayName},{onConflict:'pack_id,role_key'});fail(res,'Saving Pack role name');
+}
 export async function listInvites(){requireMember();const res=await client.from('member_invites').select('email,role,den_scopes,created_at').eq('pack_id',packId);fail(res,'Pending invites');return res.data||[]}
 export async function addLeaderInvite({email,role,denScopes=[]}){
  requireMember();if(!['admin','cubmaster'].includes(member.role))throw Error('Only Pack admins may invite leaders');
