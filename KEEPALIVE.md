@@ -26,7 +26,7 @@ request times out after 15 seconds, with up to three attempts.
 
 GitHub disables scheduled workflows in public repositories after 60 days without
 repository activity. A separate job updates `.github/heartbeat-schedule.timestamp`
-every 25 days and commits only that file. This job has `contents: write`; the
+every 7 days and commits only that file. This job has `contents: write`; the
 database check has read-only repository access. The timestamp records schedule
 maintenance, **not** the last successful database check. See Actions for database
 results. The maintenance job still runs when the database check fails.
