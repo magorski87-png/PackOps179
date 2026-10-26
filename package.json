@@ -9,7 +9,8 @@
     "build": "node tools/build.mjs",
     "serve": "node tools/serve.mjs",
     "build:production": "node tools/build.mjs --require-cloud",
-    "check:live": "node tools/check-live-services.mjs"
+    "check:live": "node tools/check-live-services.mjs",
+    "check:heartbeat": "node tools/heartbeat.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.9"

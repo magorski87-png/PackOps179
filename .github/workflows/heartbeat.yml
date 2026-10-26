@@ -1,0 +1,68 @@
+name: Keep PackOps active
+on:
+  schedule:
+    - cron: '23 2,8,14,20 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/heartbeat.yml'
+      - 'tools/heartbeat.mjs'
+      - 'cloud-config.js'
+permissions:
+  contents: read
+concurrency:
+  group: packops-heartbeat
+  cancel-in-progress: false
+jobs:
+  database-heartbeat:
+    if: github.repository == 'magorski87-png/PackOps179'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Query database liveness endpoint
+        run: node tools/heartbeat.mjs
+      - name: Record outcome
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: echo "Database heartbeat result — $RESULT. See the query step for details." >> "$GITHUB_STEP_SUMMARY"
+  maintain-schedule:
+    # Keep the scheduler alive even if the database check fails.
+    if: github.repository == 'magorski87-png/PackOps179'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Refresh repository activity every 25 days
+        shell: bash
+        run: |
+          set -euo pipefail
+          stamp=.github/heartbeat-schedule.timestamp
+          previous=0
+          if [[ -f "$stamp" ]]; then previous=$(cat "$stamp"); fi
+          if [[ ! "$previous" =~ ^[0-9]{1,12}$ ]]; then
+            echo 'Invalid heartbeat schedule timestamp'; exit 1
+          fi
+          current=$(date -u +%s)
+          if (( current - previous < 25 * 86400 )); then
+            echo 'Repository activity refresh is not due.'
+            exit 0
+          fi
+          date -u +%s > "$stamp"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- "$stamp"
+          git commit -m 'chore: refresh heartbeat schedule activity [skip ci]'
+          # Never force-push; a concurrent main update safely fails this run.
+          git push origin HEAD:main
