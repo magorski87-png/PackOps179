@@ -32,7 +32,8 @@ maintenance, **not** the last successful database check. See Actions for databas
 results. The maintenance job still runs when the database check fails.
 
 The maintenance commit uses GitHub's built-in token, does not force-push, and does
-not trigger another workflow run. If repository rules later block automated
+not recursively trigger this heartbeat workflow. Branch-based Pages hosting may
+rebuild after a maintenance commit. If repository rules later block automated
 commits, the maintenance job fails visibly and those rules need to be addressed.
 
 ## Limits and recovery
